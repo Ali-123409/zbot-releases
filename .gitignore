@@ -1,0 +1,25 @@
+# Build artifacts
+android-bot/app/build/
+android-bot/.gradle/
+android-bot/local.properties
+android-bot/app/google-services.json
+
+# Native libs (download separately — see README)
+android-bot/app/src/main/jniLibs/
+
+# Node
+bot/node_modules/
+bot/dist/
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# APK
+*.apk

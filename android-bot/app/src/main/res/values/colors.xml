@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="zbot_primary">#FF6149</color>
+    <color name="zbot_primary_dark">#DC3C28</color>
+    <color name="zbot_background">#0A0A0F</color>
+    <color name="zbot_surface">#12121C</color>
+    <color name="zbot_surface_variant">#1A1A2E</color>
+    <color name="zbot_on_primary">#FFFFFF</color>
+    <color name="zbot_on_surface">#F5F5F7</color>
+    <color name="zbot_on_surface_variant">#8E8E93</color>
+    <color name="zbot_success">#30D158</color>
+    <color name="zbot_error">#FF453A</color>
+    <color name="zbot_warning">#FFD60A</color>
+    <color name="zbot_outline">#2A2A3E</color>
+</resources>

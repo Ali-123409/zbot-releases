@@ -1,0 +1,236 @@
+package com.zbot.wa.ui.screens
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import com.zbot.wa.BotService
+import com.zbot.wa.data.FirebaseConfig
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import org.json.JSONObject
+
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+fun StatusScreen(
+    onPairClick: () -> Unit,
+    onSettingsClick: () -> Unit,
+    onCommandsClick: () -> Unit,
+    onAboutClick: () -> Unit,
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var status by remember { mutableStateOf("Loading...") }
+    var connected by remember { mutableStateOf(false) }
+    var phone by remember { mutableStateOf("") }
+    var approved by remember { mutableStateOf(false) }
+
+    // Poll bot status every 3 seconds
+    LaunchedEffect(Unit) {
+        while (true) {
+            try {
+                val client = OkHttpClient()
+                val req = Request.Builder().url("http://127.0.0.1:3001/status").build()
+                val resp = withContext(Dispatchers.IO) { client.newCall(req).execute() }
+                if (resp.isSuccessful) {
+                    val json = JSONObject(resp.body!!.string())
+                    status = json.optString("status", "Unknown")
+                    connected = json.optBoolean("connected", false)
+                    phone = json.optString("phone", "")
+                    approved = json.optBoolean("approved", false)
+                } else {
+                    status = if (BotService.isRunning) "Bot starting..." else "Bot not running"
+                    connected = false
+                }
+            } catch (e: Exception) {
+                status = if (BotService.isRunning) "Bot starting..." else "Tap Start to launch"
+                connected = false
+            }
+            kotlinx.coroutines.delay(3000)
+        }
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Zbot", fontWeight = FontWeight.Bold) },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background
+                ),
+            )
+        }
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(16.dp)
+        ) {
+            // Status card
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                shape = RoundedCornerShape(16.dp),
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Text(
+                        text = "Bot Status",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = status,
+                        style = MaterialTheme.typography.headlineMedium,
+                        color = if (connected) MaterialTheme.colorScheme.onSurface
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    if (connected && phone.isNotEmpty()) {
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = if (approved) "✅ Approved by admin"
+                                   else "⏳ Pending admin approval",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (approved) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            // Action buttons
+            if (!connected) {
+                Button(
+                    onClick = onPairClick,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp),
+                    shape = RoundedCornerShape(12.dp),
+                ) {
+                    Icon(Icons.Default.Link, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Pair WhatsApp Number")
+                }
+                Spacer(Modifier.height(8.dp))
+            } else {
+                Button(
+                    onClick = {
+                        scope.launch {
+                            withContext(Dispatchers.IO) {
+                                val client = OkHttpClient()
+                                val req = Request.Builder()
+                                    .url("http://127.0.0.1:3001/disconnect")
+                                    .build()
+                                client.newCall(req).execute()
+                            }
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error
+                    ),
+                ) {
+                    Icon(Icons.Default.LinkOff, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Disconnect")
+                }
+                Spacer(Modifier.height(8.dp))
+            }
+
+            // Start bot button (if not running)
+            if (!BotService.isRunning) {
+                Button(
+                    onClick = {
+                        val intent = android.content.Intent(context, BotService::class.java).apply {
+                            action = BotService.ACTION_START
+                        }
+                        androidx.core.content.ContextCompat.startForegroundService(context, intent)
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp),
+                    shape = RoundedCornerShape(12.dp),
+                ) {
+                    Icon(Icons.Default.PlayArrow, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Start Bot")
+                }
+                Spacer(Modifier.height(16.dp))
+            }
+
+            // Menu items
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                shape = RoundedCornerShape(16.dp),
+            ) {
+                Column {
+                    MenuItem(
+                        icon = Icons.Default.List,
+                        title = "Commands",
+                        subtitle = "View all available commands",
+                        onClick = onCommandsClick,
+                    )
+                    Divider(color = MaterialTheme.colorScheme.outline)
+                    MenuItem(
+                        icon = Icons.Default.Settings,
+                        title = "Settings",
+                        subtitle = "Bot configuration",
+                        onClick = onSettingsClick,
+                    )
+                    Divider(color = MaterialTheme.colorScheme.outline)
+                    MenuItem(
+                        icon = Icons.Default.Info,
+                        title = "About",
+                        subtitle = "App info",
+                        onClick = onAboutClick,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun MenuItem(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp)
+            .height(48.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+        Spacer(Modifier.width(16.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
+            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Icon(Icons.Default.ChevronRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}

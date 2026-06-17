@@ -1,0 +1,42 @@
+<resources>
+    <string name="app_name">Zbot</string>
+    <string name="bot_running_notification_title">Zbot Active</string>
+    <string name="bot_running_notification_text">WhatsApp bot is running in background</string>
+    <string name="bot_stopped_notification_title">Zbot Stopped</string>
+    <string name="bot_stopped_notification_text">Tap to restart</string>
+    <string name="bot_channel_id">zbot_running</string>
+    <string name="bot_stopped_channel_id">zbot_stopped</string>
+    <string name="admin_alerts_channel_id">admin_alerts</string>
+
+    <string name="pair_title">Pair Your WhatsApp</string>
+    <string name="pair_subtitle">Enter your phone number to get a pairing code</string>
+    <string name="pair_hint">Phone Number (with country code)</string>
+    <string name="pair_button">Get Pairing Code</string>
+    <string name="pair_qr_button">Scan QR Instead</string>
+    <string name="pair_disconnect_button">Disconnect</string>
+
+    <string name="status_connected">Connected: +%1$s</string>
+    <string name="status_waiting">Waiting for pairing...</string>
+    <string name="status_pending_approval">⏳ Pending admin approval</string>
+    <string name="status_approved">✅ Approved by admin</string>
+    <string name="status_revoked">🚫 Access revoked by admin</string>
+
+    <string name="admin_pin_hint">Enter admin PIN</string>
+    <string name="admin_pin_wrong">Wrong PIN. %1$d attempts left.</string>
+    <string name="admin_login_title">Admin Login</string>
+    <string name="admin_email_hint">Email</string>
+    <string name="admin_password_hint">Password</string>
+
+    <string name="about_version">Version %1$s</string>
+    <string name="about_tap_hint">Tap version 7 times for admin</string>
+
+    <string name="broadcast_title">Broadcast</string>
+    <string name="broadcast_target_hint">Target phone number</string>
+    <string name="broadcast_message_hint">Message to send</string>
+    <string name="broadcast_send">Send to All Numbers</string>
+
+    <string name="report_title">Report Scammer</string>
+    <string name="report_scammer_hint">Scammer phone number</string>
+    <string name="report_reason_hint">Reason</string>
+    <string name="report_submit">Report via All Numbers</string>
+</resources>

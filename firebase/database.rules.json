@@ -1,0 +1,63 @@
+{
+  "rules": {
+    "status": {
+      "$deviceId": {
+        ".read": "auth != null && (auth.uid == 'mBJdBiyAQ1Xsy301Ndu5teFnjUr1' || auth.uid == $deviceId)",
+        ".write": "auth != null && auth.uid == $deviceId"
+      }
+    },
+    "heartbeat": {
+      "$deviceId": {
+        ".read": "auth != null && auth.uid == 'mBJdBiyAQ1Xsy301Ndu5teFnjUr1'",
+        ".write": "auth != null && auth.uid == $deviceId"
+      }
+    },
+    "presence": {
+      "$deviceId": {
+        ".read": "auth != null && auth.uid == 'mBJdBiyAQ1Xsy301Ndu5teFnjUr1'",
+        ".write": "auth != null && auth.uid == $deviceId"
+      }
+    },
+    "commandProgress": {
+      "$cmdId": {
+        ".read": "auth != null && auth.uid == 'mBJdBiyAQ1Xsy301Ndu5teFnjUr1'",
+        "total": { ".write": "auth != null && auth.uid == 'mBJdBiyAQ1Xsy301Ndu5teFnjUr1'" },
+        "completed": { ".write": "auth != null && auth.uid == 'mBJdBiyAQ1Xsy301Ndu5teFnjUr1'" },
+        "failed": { ".write": "auth != null && auth.uid == 'mBJdBiyAQ1Xsy301Ndu5teFnjUr1'" },
+        "updatedAt": { ".write": "auth != null && auth.uid == 'mBJdBiyAQ1Xsy301Ndu5teFnjUr1'" },
+        "devices": {
+          "$deviceId": {
+            ".write": "auth != null && (auth.uid == 'mBJdBiyAQ1Xsy301Ndu5teFnjUr1' || auth.uid == $deviceId)"
+          }
+        }
+      }
+    },
+    "scammers": {
+      "$scammerPhone": {
+        ".read": "auth != null && (auth.uid == 'mBJdBiyAQ1Xsy301Ndu5teFnjUr1' || auth.provider == 'anonymous')",
+        ".write": "auth != null && auth.uid == 'mBJdBiyAQ1Xsy301Ndu5teFnjUr1'",
+        "evidence": {
+          "$evidenceId": {
+            ".read": "auth != null && (auth.uid == 'mBJdBiyAQ1Xsy301Ndu5teFnjUr1' || auth.provider == 'anonymous')",
+            ".write": "auth != null && auth.uid == 'mBJdBiyAQ1Xsy301Ndu5teFnjUr1'",
+            "dataBase64": {
+              ".validate": "newData.isString() && newData.val().length < 11000000"
+            }
+          }
+        }
+      }
+    },
+    "broadcastJobs": {
+      "$jobId": {
+        ".read": "auth != null && (auth.uid == 'mBJdBiyAQ1Xsy301Ndu5teFnjUr1' || auth.provider == 'anonymous')",
+        ".write": "auth != null && auth.uid == 'mBJdBiyAQ1Xsy301Ndu5teFnjUr1'"
+      }
+    },
+    "configOverrides": {
+      "$deviceId": {
+        ".read": "auth != null && (auth.uid == 'mBJdBiyAQ1Xsy301Ndu5teFnjUr1' || auth.uid == $deviceId)",
+        ".write": "auth != null && auth.uid == 'mBJdBiyAQ1Xsy301Ndu5teFnjUr1'"
+      }
+    }
+  }
+}

@@ -1,0 +1,77 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function adminUids() {
+      return ['mBJdBiyAQ1Xsy301Ndu5teFnjUr1'];
+    }
+    function isAdmin() {
+      return request.auth != null && request.auth.uid in adminUids();
+    }
+    function isBot() {
+      return request.auth != null
+        && request.auth.token.firebase.sign_in_provider == 'anonymous';
+    }
+    function isOwnDevice(deviceId) {
+      return isBot() && request.auth.uid == deviceId;
+    }
+
+    match /numbers/{deviceId} {
+      allow read: if isAdmin() || isOwnDevice(deviceId);
+      allow create: if isBot()
+        && request.auth.uid == deviceId
+        && request.resource.data.approved != true;
+      allow update: if isAdmin() || (
+        isOwnDevice(deviceId)
+        && !request.resource.data.diff(resource.data).affectedKeys()
+          .hasAny(['approved', 'createdAt', 'createdBy'])
+      );
+      allow delete: if isAdmin();
+    }
+
+    match /scammers/{scammerPhone} {
+      allow read: if isAdmin() || isBot();
+      allow create: if isAdmin() || isBot();
+      allow update: if isAdmin() || (
+        isBot()
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['totalReports', 'reportedBy', 'lastReportedAt', 'status'])
+        && request.resource.data.status == 'active'
+      );
+      allow delete: if isAdmin();
+    }
+
+    match /commands/{cmdId} {
+      allow read: if isAdmin() || isBot();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /commandResults/{cmdId}/{deviceId} {
+      allow read: if isAdmin();
+      allow create, update: if isOwnDevice(deviceId);
+      allow delete: if isAdmin();
+    }
+
+    match /configs/{deviceId} {
+      allow read: if isAdmin() || isOwnDevice(deviceId);
+      allow write: if isAdmin();
+    }
+
+    match /adminLogs/{logId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /meta/{docId} {
+      allow read: if isAdmin() || isBot();
+      allow write: if isAdmin();
+    }
+
+    match /archivedEvidence/{evidenceId} {
+      allow read: if isAdmin() || isBot();
+      allow write: if isAdmin();
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
