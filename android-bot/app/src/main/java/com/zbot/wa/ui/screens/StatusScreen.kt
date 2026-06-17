@@ -4,7 +4,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -37,6 +39,9 @@ fun StatusScreen(
     var connected by remember { mutableStateOf(false) }
     var phone by remember { mutableStateOf("") }
     var approved by remember { mutableStateOf(false) }
+    var showLogs by remember { mutableStateOf(false) }
+    var logsContent by remember { mutableStateOf("") }
+    var logsLoading by remember { mutableStateOf(false) }
 
     // Poll bot status every 3 seconds
     LaunchedEffect(Unit) {
@@ -174,6 +179,86 @@ fun StatusScreen(
                     Spacer(Modifier.width(8.dp))
                     Text("Start Bot")
                 }
+                Spacer(Modifier.height(8.dp))
+                // View Logs button (debug)
+                OutlinedButton(
+                    onClick = {
+                        logsLoading = true
+                        showLogs = true
+                        // First show Kotlin-side logs
+                        logsContent = "=== Kotlin BotService logs ===\n${BotService.getRecentLogs()}\n\n=== Node.js bot logs (fetching...) ===\n"
+                        scope.launch {
+                            try {
+                                val client = OkHttpClient()
+                                val req = Request.Builder().url("http://127.0.0.1:3001/logs").build()
+                                val resp = withContext(Dispatchers.IO) { client.newCall(req).execute() }
+                                if (resp.isSuccessful) {
+                                    val json = JSONObject(resp.body!!.string())
+                                    val logs = json.getJSONArray("logs")
+                                    val sb = StringBuilder()
+                                    for (i in 0 until logs.length()) {
+                                        sb.append(logs.getString(i)).append('\n')
+                                    }
+                                    logsContent = "=== Kotlin BotService logs ===\n${BotService.getRecentLogs()}\n\n=== Node.js bot logs ===\n$sb"
+                                } else {
+                                    logsContent = "=== Kotlin BotService logs ===\n${BotService.getRecentLogs()}\n\n=== Node.js HTTP /logs failed: ${resp.code} ==="
+                                }
+                            } catch (e: Exception) {
+                                logsContent = "=== Kotlin BotService logs ===\n${BotService.getRecentLogs()}\n\n=== Node.js HTTP /logs unreachable: ${e.message} ===\n(Bot may have crashed before HTTP server started)"
+                            } finally {
+                                logsLoading = false
+                            }
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp),
+                    shape = RoundedCornerShape(12.dp),
+                ) {
+                    Icon(Icons.Default.BugReport, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("View Logs (Debug)")
+                }
+                Spacer(Modifier.height(16.dp))
+            } else {
+                // Bot is running — also show logs button
+                OutlinedButton(
+                    onClick = {
+                        logsLoading = true
+                        showLogs = true
+                        logsContent = "=== Kotlin BotService logs ===\n${BotService.getRecentLogs()}\n\n=== Node.js bot logs (fetching...) ===\n"
+                        scope.launch {
+                            try {
+                                val client = OkHttpClient()
+                                val req = Request.Builder().url("http://127.0.0.1:3001/logs").build()
+                                val resp = withContext(Dispatchers.IO) { client.newCall(req).execute() }
+                                if (resp.isSuccessful) {
+                                    val json = JSONObject(resp.body!!.string())
+                                    val logs = json.getJSONArray("logs")
+                                    val sb = StringBuilder()
+                                    for (i in 0 until logs.length()) {
+                                        sb.append(logs.getString(i)).append('\n')
+                                    }
+                                    logsContent = "=== Kotlin BotService logs ===\n${BotService.getRecentLogs()}\n\n=== Node.js bot logs ===\n$sb"
+                                } else {
+                                    logsContent = "=== Kotlin BotService logs ===\n${BotService.getRecentLogs()}\n\n=== Node.js HTTP /logs failed: ${resp.code} ==="
+                                }
+                            } catch (e: Exception) {
+                                logsContent = "=== Kotlin BotService logs ===\n${BotService.getRecentLogs()}\n\n=== Node.js HTTP /logs unreachable: ${e.message} ==="
+                            } finally {
+                                logsLoading = false
+                            }
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp),
+                    shape = RoundedCornerShape(12.dp),
+                ) {
+                    Icon(Icons.Default.BugReport, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("View Logs (Debug)")
+                }
                 Spacer(Modifier.height(16.dp))
             }
 
@@ -207,6 +292,34 @@ fun StatusScreen(
                 }
             }
         }
+    }
+
+    // Logs dialog
+    if (showLogs) {
+        AlertDialog(
+            onDismissRequest = { showLogs = false },
+            title = { Text("Bot Logs") },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    if (logsLoading) {
+                        CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                        Spacer(Modifier.height(8.dp))
+                    }
+                    Text(
+                        text = logsContent,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showLogs = false }) { Text("Close") }
+            },
+        )
     }
 }
 

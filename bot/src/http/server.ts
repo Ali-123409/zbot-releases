@@ -14,11 +14,50 @@ import { getConfig, updateConfig, persistConfig } from '../firebase/config-runti
 const PORT = parseInt(process.env.BOT_PORT || '3001', 10);
 const HOST = '127.0.0.1';
 
+// Ring buffer for bot-side logs (max 500 lines)
+const botLogs: string[] = [];
+const MAX_LOGS = 500;
+function addLog(line: string): void {
+  botLogs.push(`[${new Date().toISOString()}] ${line}`);
+  while (botLogs.length > MAX_LOGS) botLogs.shift();
+}
+
+// Capture console.log + console.error into the buffer
+const origLog = console.log;
+const origErr = console.error;
+console.log = (...args: any[]) => {
+  const line = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
+  addLog(line);
+  origLog.apply(console, args as any);
+};
+console.error = (...args: any[]) => {
+  const line = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
+  addLog(`ERROR: ${line}`);
+  origErr.apply(console, args as any);
+};
+
+// Capture uncaught exceptions
+process.on('uncaughtException', (err) => {
+  addLog(`UNCAUGHT EXCEPTION: ${err.message}\n${err.stack || ''}`);
+});
+process.on('unhandledRejection', (reason) => {
+  addLog(`UNHANDLED REJECTION: ${String(reason)}`);
+});
+
 export function startHttpServer(): { close: () => void } {
   const app = express();
   app.use(express.json({ limit: '15mb' }));
 
   app.get('/health', (_req, res) => res.json({ ok: true, ts: Date.now() }));
+
+  // Debug endpoint — returns all accumulated bot logs
+  app.get('/logs', (_req, res) => {
+    res.json({
+      logs: botLogs,
+      count: botLogs.length,
+      ts: Date.now(),
+    });
+  });
 
   app.get('/status', (_req, res) => {
     const sock = getSocket();
