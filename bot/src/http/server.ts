@@ -1,5 +1,5 @@
 /**
- * Zbot — Local HTTP Server (127.0.0.1:3001 ONLY)
+ * Zbot — Local HTTP Server
  */
 
 import express from 'express';
@@ -13,38 +13,90 @@ import { getConfig, updateConfig, persistConfig } from '../firebase/config-runti
 
 const PORT = parseInt(process.env.BOT_PORT || '3001', 10);
 // Use 0.0.0.0 like FTGM — nodejs-mobile on Android has network isolation
-// that prevents external apps from connecting anyway. 127.0.0.1 may have
-// issues with IPv4/IPv6 resolution on some Android devices.
 const HOST = '0.0.0.0';
 
 // Ring buffer for bot-side logs (max 500 lines)
 const botLogs: string[] = [];
 const MAX_LOGS = 500;
+
 function addLog(line: string): void {
-  botLogs.push(`[${new Date().toISOString()}] ${line}`);
-  while (botLogs.length > MAX_LOGS) botLogs.shift();
+  try {
+    botLogs.push(`[${new Date().toISOString()}] ${line}`);
+    while (botLogs.length > MAX_LOGS) botLogs.shift();
+  } catch (e) {
+    // ignore — logging should never crash the bot
+  }
+}
+
+// Safe stringify — never throws (unlike JSON.stringify on circular refs)
+function safeStringify(arg: any): string {
+  try {
+    if (arg === null) return 'null';
+    if (arg === undefined) return 'undefined';
+    if (typeof arg === 'string') return arg;
+    if (typeof arg === 'number' || typeof arg === 'boolean') return String(arg);
+    if (arg instanceof Error) return arg.message + '\n' + (arg.stack || '');
+    if (typeof arg === 'object') {
+      // Use util.inspect for objects (handles circular refs)
+      const util = require('util');
+      return util.inspect(arg, { depth: 3, maxArrayLength: 10 });
+    }
+    return String(arg);
+  } catch (e) {
+    return '[unprintable]';
+  }
 }
 
 // Capture console.log + console.error into the buffer
-const origLog = console.log;
-const origErr = console.error;
+// IMPORTANT: We save the ORIGINAL references BEFORE overriding
+const origLog = console.log.bind(console);
+const origErr = console.error.bind(console);
+const origWarn = console.warn.bind(console);
+
 console.log = (...args: any[]) => {
-  const line = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
-  addLog(line);
-  origLog.apply(console, args as any);
+  try {
+    const line = args.map(safeStringify).join(' ');
+    addLog(line);
+  } catch (e) {
+    // ignore
+  }
+  origLog(...args);
 };
 console.error = (...args: any[]) => {
-  const line = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
-  addLog(`ERROR: ${line}`);
-  origErr.apply(console, args as any);
+  try {
+    const line = args.map(safeStringify).join(' ');
+    addLog(`ERROR: ${line}`);
+  } catch (e) {
+    // ignore
+  }
+  origErr(...args);
+};
+console.warn = (...args: any[]) => {
+  try {
+    const line = args.map(safeStringify).join(' ');
+    addLog(`WARN: ${line}`);
+  } catch (e) {
+    // ignore
+  }
+  origWarn(...args);
 };
 
-// Capture uncaught exceptions
+// Capture uncaught exceptions — DON'T exit, just log
 process.on('uncaughtException', (err) => {
-  addLog(`UNCAUGHT EXCEPTION: ${err.message}\n${err.stack || ''}`);
+  try {
+    addLog(`UNCAUGHT EXCEPTION: ${err.message}\n${err.stack || ''}`);
+    origErr(`[UNCAUGHT] ${err.message}\n${err.stack || ''}`);
+  } catch (e) {
+    // ignore
+  }
 });
 process.on('unhandledRejection', (reason) => {
-  addLog(`UNHANDLED REJECTION: ${String(reason)}`);
+  try {
+    addLog(`UNHANDLED REJECTION: ${safeStringify(reason)}`);
+    origErr(`[UNHANDLED REJECTION] ${safeStringify(reason)}`);
+  } catch (e) {
+    // ignore
+  }
 });
 
 export function startHttpServer(): { close: () => void } {

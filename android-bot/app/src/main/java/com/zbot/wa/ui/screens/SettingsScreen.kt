@@ -29,7 +29,7 @@ fun SettingsScreen(onBack: () -> Unit) {
     LaunchedEffect(Unit) {
         try {
             val client = OkHttpClient()
-            val req = Request.Builder().url("http://127.0.0.1:3001/get-config").build()
+            val req = Request.Builder().url("http://localhost:3001/get-config").build()
             val resp = withContext(Dispatchers.IO) { client.newCall(req).execute() }
             if (resp.isSuccessful) {
                 config = JSONObject(resp.body!!.string())
@@ -118,7 +118,7 @@ private fun ToggleRow(
                             .toRequestBody("application/json".toMediaType())
                         val client = OkHttpClient()
                         val req = Request.Builder()
-                            .url("http://127.0.0.1:3001/set-config")
+                            .url("http://localhost:3001/set-config")
                             .post(body)
                             .build()
                         client.newCall(req).execute()

@@ -91,7 +91,7 @@ fun PairScreen(onBack: () -> Unit) {
                             val cleaned = phone.replace(Regex("[^0-9]"), "")
                             val client = OkHttpClient()
                             val req = Request.Builder()
-                                .url("http://127.0.0.1:3001/pair?phone=$cleaned")
+                                .url("http://localhost:3001/pair?phone=$cleaned")
                                 .build()
                             val resp = withContext(Dispatchers.IO) { client.newCall(req).execute() }
                             val body = resp.body!!.string()
