@@ -79,7 +79,20 @@ async function bootstrap(): Promise<void> {
   try { startHttpServer(); }
   catch (err) { console.error('[BOOT] HTTP server failed:', err); }
 
-  console.log('[BOOT] bootstrap complete');
+  console.log('[BOOT] bootstrap complete — bot is now running');
+
+  // CRITICAL: Keep Node.js alive!
+  // Without this, Node exits with code 0 when bootstrap() returns,
+  // because all the async work (Baileys socket, HTTP server, Firebase
+  // listeners) is set up via callbacks but Node doesn't see them as
+  // pending work in the main execution context.
+  //
+  // The setInterval keeps the event loop busy forever (until SIGINT/SIGTERM).
+  // We use a long interval (60s) so it doesn't waste CPU.
+  setInterval(() => {
+    // Heartbeat — just keep event loop alive
+    console.log('[BOOT] heartbeat — bot still running');
+  }, 60_000);
 }
 
 let _shuttingDown = false;
@@ -97,10 +110,18 @@ async function gracefulShutdown(signal: string): Promise<void> {
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGHUP', () => gracefulShutdown('SIGHUP'));
-process.on('uncaughtException', (err) => console.error('[BOOT] uncaughtException:', err));
-process.on('unhandledRejection', (reason) => console.error('[BOOT] unhandledRejection:', reason));
+
+// IMPORTANT: don't exit on uncaughtException — log and keep running
+process.on('uncaughtException', (err) => {
+  console.error('[BOOT] uncaughtException:', err.message);
+  console.error(err.stack || '');
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[BOOT] unhandledRejection:', reason);
+});
 
 bootstrap().catch(err => {
   console.error('[BOOT] FATAL:', err);
-  process.exit(1);
+  // Don't exit immediately — give time to flush logs
+  setTimeout(() => process.exit(1), 1000);
 });
