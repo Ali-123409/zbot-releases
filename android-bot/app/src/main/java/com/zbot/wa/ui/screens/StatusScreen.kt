@@ -1,5 +1,6 @@
 package com.zbot.wa.ui.screens
 
+import android.content.Intent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -294,11 +295,15 @@ fun StatusScreen(
         }
     }
 
-    // Logs dialog
+    // Logs dialog with Copy + Share buttons
     if (showLogs) {
+        val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
+        val context = androidx.compose.ui.platform.LocalContext.current
+        var copied by remember { mutableStateOf(false) }
+
         AlertDialog(
             onDismissRequest = { showLogs = false },
-            title = { Text("Bot Logs") },
+            title = { Text("Bot Logs (${logsContent.length} chars)") },
             text = {
                 Column(
                     modifier = Modifier
@@ -309,6 +314,14 @@ fun StatusScreen(
                         CircularProgressIndicator(modifier = Modifier.size(24.dp))
                         Spacer(Modifier.height(8.dp))
                     }
+                    if (copied) {
+                        Text(
+                            text = "✅ Logs copied to clipboard!",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(bottom = 8.dp),
+                        )
+                    }
                     Text(
                         text = logsContent,
                         style = MaterialTheme.typography.bodySmall,
@@ -317,7 +330,36 @@ fun StatusScreen(
                 }
             },
             confirmButton = {
-                TextButton(onClick = { showLogs = false }) { Text("Close") }
+                Row {
+                    // Copy to clipboard
+                    TextButton(
+                        onClick = {
+                            clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(logsContent))
+                            copied = true
+                        }
+                    ) {
+                        Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Copy")
+                    }
+                    // Share via other apps (WhatsApp, email, etc.)
+                    TextButton(
+                        onClick = {
+                            val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                                type = "text/plain"
+                                putExtra(Intent.EXTRA_SUBJECT, "Zbot Debug Logs")
+                                putExtra(Intent.EXTRA_TEXT, logsContent)
+                            }
+                            context.startActivity(Intent.createChooser(sendIntent, "Share logs via..."))
+                        }
+                    ) {
+                        Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Share")
+                    }
+                    // Close
+                    TextButton(onClick = { showLogs = false }) { Text("Close") }
+                }
             },
         )
     }
