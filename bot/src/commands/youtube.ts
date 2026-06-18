@@ -1,5 +1,4 @@
 import axios from 'axios';
-import yts from 'yt-search';
 import type { CommandModule } from './_registry';
 
 interface YtSearchResult {
@@ -7,13 +6,47 @@ interface YtSearchResult {
   author: string; thumbnail: string;
 }
 
+/**
+ * Search YouTube using the InnerTube API (no cheerio needed).
+ * Uses the same API key as the download function.
+ */
 async function searchYouTube(query: string, limit = 5): Promise<YtSearchResult[]> {
-  const result = await yts(query);
-  const videos: any[] = (result as any).videos || [];
-  return videos.slice(0, limit).map((v: any) => ({
-    title: v.title, url: v.url, duration: v.timestamp,
-    author: v.author?.name || 'Unknown', thumbnail: v.thumbnail,
-  }));
+  const API_KEY = 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8';
+  const INNERTUBE_URL = `https://www.youtube.com/youtubei/v1/search?key=${API_KEY}`;
+
+  const payload = {
+    context: {
+      client: {
+        clientName: 'WEB',
+        clientVersion: '2.20240101.00.00',
+      },
+    },
+    query,
+  };
+
+  const res = await axios.post(INNERTUBE_URL, payload, {
+    headers: { 'Content-Type': 'application/json' },
+    timeout: 15_000,
+  });
+
+  const results: YtSearchResult[] = [];
+  const contents = res.data?.contents?.twoColumnSearchResultsRenderer?.primaryContents?.sectionListRenderer?.contents?.[0]?.itemSectionRenderer?.contents || [];
+
+  for (const item of contents) {
+    if (results.length >= limit) break;
+    const video = item.videoRenderer;
+    if (!video?.videoId) continue;
+
+    results.push({
+      title: video.title?.runs?.[0]?.text || 'Unknown',
+      url: `https://www.youtube.com/watch?v=${video.videoId}`,
+      duration: video.lengthText?.simpleText || 'N/A',
+      author: video.ownerText?.runs?.[0]?.text || 'Unknown',
+      thumbnail: video.thumbnail?.thumbnails?.[0]?.url || '',
+    });
+  }
+
+  return results;
 }
 
 async function downloadYt(url: string, type: 'audio' | 'video'): Promise<Buffer> {
