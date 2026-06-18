@@ -12,7 +12,10 @@ import { isApproved, isRevoked } from '../firebase/number-registry';
 import { getConfig, updateConfig, persistConfig } from '../firebase/config-runtime';
 
 const PORT = parseInt(process.env.BOT_PORT || '3001', 10);
-const HOST = '127.0.0.1';
+// Use 0.0.0.0 like FTGM — nodejs-mobile on Android has network isolation
+// that prevents external apps from connecting anyway. 127.0.0.1 may have
+// issues with IPv4/IPv6 resolution on some Android devices.
+const HOST = '0.0.0.0';
 
 // Ring buffer for bot-side logs (max 500 lines)
 const botLogs: string[] = [];

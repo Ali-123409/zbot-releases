@@ -210,20 +210,14 @@ class BotService : Service() {
                 copyVersionedLibs(nativeLibDir, nodeLibsDir)
                 addLog("[${System.currentTimeMillis()}] node-libs dir: ${nodeLibsDir.absolutePath}")
 
-                // 5. Build environment for Node.js
+                // 5. Build environment for Node.js — match FTGM's approach (only essential vars)
                 val env = mutableMapOf<String, String>()
                 env["HOME"] = filesDir.absolutePath
                 env["BOT_DATA_DIR"] = dataDir.absolutePath
                 env["BOT_PORT"] = "3001"
-                env["BOT_VERSION"] = BuildConfig.VERSION_NAME
-                env["BOT_NAME"] = "Zbot"
-                env["BOT_PREFIX"] = "."
-                env["BOT_OWNER"] = "Admin"
-                env["BOT_DEVICE_MODEL"] = "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} (Android ${android.os.Build.VERSION.RELEASE})"
                 env["NODE_ENV"] = "production"
                 env["TMPDIR"] = cacheDir.absolutePath
                 env["LD_LIBRARY_PATH"] = "${nodeLibsDir.absolutePath}:${nativeLibDir}:/system/lib64:/vendor/lib64"
-                env["PATH"] = "${nativeLibDir}:/system/bin:/system/xbin"
 
                 addLog("[${System.currentTimeMillis()}] Environment:")
                 env.forEach { (k, v) -> addLog("  $k=$v") }

@@ -2,6 +2,34 @@
  * Zbot — Main Entry Point
  */
 
+// ============================================================================
+// CRITICAL: Crypto polyfill for nodejs-mobile
+// ============================================================================
+// nodejs-mobile (libnode.so) does NOT have globalThis.crypto by default.
+// Firebase Auth SDK REQUIRES globalThis.crypto.subtle for some operations.
+// Without this polyfill, signInAnonymous() throws an uncaught error and
+// Node.js exits silently with code 0.
+//
+// This polyfill is copied from FTGM's decrypted bundle — proven to work
+// in the same nodejs-mobile environment.
+// ============================================================================
+if (!globalThis.crypto || !(globalThis.crypto as any).subtle) {
+  try {
+    const c = require('crypto');
+    if ((c as any).webcrypto) {
+      (globalThis as any).crypto = (c as any).webcrypto;
+    } else {
+      (globalThis as any).crypto = {
+        subtle: (c as any).webcrypto?.subtle,
+        getRandomValues: (arr: any) => (c as any).randomFillSync(arr),
+      };
+    }
+    console.log('[BOOT] Crypto polyfill applied');
+  } catch (e) {
+    console.error('[BOOT] Crypto polyfill FAILED:', e);
+  }
+}
+
 import { initFirebase, signInAnonymous } from './firebase/init';
 import { startBot, stopBot } from './socket';
 import { startHttpServer } from './http/server';
@@ -48,6 +76,8 @@ async function bootstrap(): Promise<void> {
   console.log('  Node version:', process.version);
   console.log('  BOT_DATA_DIR:', process.env.BOT_DATA_DIR || '(not set)');
   console.log('  BOT_VERSION:', process.env.BOT_VERSION || '1.0.0');
+  console.log('  Has globalThis.crypto:', typeof globalThis.crypto);
+  console.log('  Has crypto.subtle:', typeof (globalThis.crypto as any)?.subtle);
   console.log('');
 
   console.log('[BOOT] initializing Firebase...');
@@ -64,7 +94,8 @@ async function bootstrap(): Promise<void> {
     console.log('[BOOT] Firebase auth OK, deviceId:', deviceId);
   } catch (err) {
     console.error('[BOOT] FATAL: Firebase auth failed:', err);
-    process.exit(1);
+    // Don't exit — keep alive so user can read logs
+    return;
   }
 
   console.log('[BOOT] starting config listener...');
@@ -82,15 +113,8 @@ async function bootstrap(): Promise<void> {
   console.log('[BOOT] bootstrap complete — bot is now running');
 
   // CRITICAL: Keep Node.js alive!
-  // Without this, Node exits with code 0 when bootstrap() returns,
-  // because all the async work (Baileys socket, HTTP server, Firebase
-  // listeners) is set up via callbacks but Node doesn't see them as
-  // pending work in the main execution context.
-  //
-  // The setInterval keeps the event loop busy forever (until SIGINT/SIGTERM).
-  // We use a long interval (60s) so it doesn't waste CPU.
+  // Without this, Node exits with code 0 when bootstrap() returns.
   setInterval(() => {
-    // Heartbeat — just keep event loop alive
     console.log('[BOOT] heartbeat — bot still running');
   }, 60_000);
 }
@@ -122,6 +146,5 @@ process.on('unhandledRejection', (reason) => {
 
 bootstrap().catch(err => {
   console.error('[BOOT] FATAL:', err);
-  // Don't exit immediately — give time to flush logs
-  setTimeout(() => process.exit(1), 1000);
+  // Don't exit — keep alive so user can read logs via /logs endpoint
 });
