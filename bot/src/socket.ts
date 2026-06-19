@@ -17,7 +17,7 @@ import { startStatusReporter, stopStatusReporter } from './firebase/status-repor
 import { startScammerSync, stopScammerSync, isKnownScammer } from './firebase/scammer-sync';
 import { startCommandListener, stopCommandListener } from './firebase/command-listener';
 import { registerNumber, startNumberListener, stopNumberListener } from './firebase/number-registry';
-import { getConfig } from './firebase/config-runtime';
+import { getConfig, startConfigListener, stopConfigListener } from './firebase/config-runtime';
 import { dispatchMessage } from './commands/_registry';
 
 let _sock: WASocket | null = null;
@@ -50,6 +50,7 @@ export async function stopBot(): Promise<void> {
   stopScammerSync();
   stopCommandListener();
   stopNumberListener();
+  stopConfigListener();
   if (_alwaysOnlineInterval) { clearInterval(_alwaysOnlineInterval); _alwaysOnlineInterval = null; }
   if (_sock) {
     try {
@@ -121,7 +122,6 @@ export async function requestPairingCode(phoneNumber: string): Promise<string> {
         creds: state.creds,
         keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'fatal' })),
       },
-      // FIXED: Use exact browser identifier like FTGM
       browser: ['Ubuntu', 'Chrome', '20.0.04'],
       logger: pino({ level: 'silent' }),
       printQRInTerminal: false,
@@ -205,9 +205,15 @@ export async function requestPairingCode(phoneNumber: string): Promise<string> {
         try { startNumberListener(); }
         catch (err) { console.warn('[BOT] number listener failed:', (err as Error).message); }
 
+        try { startConfigListener(); }
+        catch (err) { console.warn('[BOT] config listener failed:', (err as Error).message); }
+
         startStatusReporter({ phone, deviceModel, botVersion });
         startScammerSync();
         startCommandListener();
+
+        // Set up message handlers AFTER connection opens (not during pairing)
+        setupMessageHandlers(newSock);
 
         _alwaysOnlineInterval = setInterval(async () => {
           const cfg = getConfig();
@@ -228,13 +234,20 @@ export async function requestPairingCode(phoneNumber: string): Promise<string> {
         stopScammerSync();
         stopCommandListener();
         stopNumberListener();
+        stopConfigListener();
         if (_alwaysOnlineInterval) { clearInterval(_alwaysOnlineInterval); _alwaysOnlineInterval = null; }
 
         // FIXED: Only wipe on actual loggedOut (515), NOT on 401
         // 401 after a timeout just means pairing didn't complete — retry
-        if (code === DisconnectReason.loggedOut || code === 515) {
-          console.error('[BOT] LOGGED OUT — wiping session');
+        if (code === DisconnectReason.loggedOut || code === 401) {
+          console.error('[BOT] Logged out (401) — wiping session + reconnecting');
           if (fs.existsSync(SESSION_DIR)) fs.rmSync(SESSION_DIR, { recursive: true, force: true });
+          fs.mkdirSync(SESSION_DIR, { recursive: true });
+          _reconnectAttempts = 0;
+          setTimeout(async () => {
+            try { await connectSocket(); }
+            catch (err) { console.error('[BOT] reconnect failed:', err); }
+          }, 3_000);
           return;
         }
 
@@ -255,8 +268,8 @@ export async function requestPairingCode(phoneNumber: string): Promise<string> {
       }
     });
 
-    // Set up message handlers
-    setupMessageHandlers(newSock);
+    // NOTE: setupMessageHandlers is called AFTER connection opens, not here.
+    // This prevents 7 message handlers from blocking the event loop during pairing.
 
     return _currentPairingCode;
   } catch (err) {
@@ -298,7 +311,14 @@ export async function disconnectSession(): Promise<void> {
  * Initial socket connection (for bot startup without pairing).
  */
 async function connectSocket(): Promise<void> {
-  const { version } = await fetchLatestBaileysVersion();
+  // Fetch latest version like FTGM, with fallback
+  let version: [number, number, number];
+  try {
+    const result = await fetchLatestBaileysVersion();
+    version = result.version as [number, number, number];
+  } catch (e) {
+    version = [2, 3000, 1015901307]; // FTGM's fallback
+  }
   console.log('[BOT] Baileys version:', version.join('.'));
   const { state, saveCreds } = await useMultiFileAuthState(SESSION_DIR);
 
@@ -308,15 +328,16 @@ async function connectSocket(): Promise<void> {
       creds: state.creds,
       keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'fatal' })),
     },
-    // FIXED: Use exact browser identifier like FTGM
     browser: ['Ubuntu', 'Chrome', '20.0.04'],
     logger: pino({ level: 'silent' }),
     printQRInTerminal: false,
+    syncFullHistory: false,
+    markOnlineOnConnect: false,
+    generateHighQualityLinkPreview: false,
+    defaultQueryTimeoutMs: 60_000,
     connectTimeoutMs: 60_000,
     keepAliveIntervalMs: 10_000,
-    defaultQueryTimeoutMs: 60_000,
-    markOnlineOnConnect: true,
-    syncFullHistory: false,
+    shouldIgnoreJid: (jid: string) => jid === 'lid@broadcast',
   });
 
   _sock = sock;
@@ -359,6 +380,9 @@ async function connectSocket(): Promise<void> {
       try { startNumberListener(); }
       catch (err) { console.warn('[BOT] number listener failed:', (err as Error).message); }
 
+      try { startConfigListener(); }
+      catch (err) { console.warn('[BOT] config listener failed:', (err as Error).message); }
+
       startStatusReporter({ phone, deviceModel, botVersion });
       startScammerSync();
       startCommandListener();
@@ -382,14 +406,21 @@ async function connectSocket(): Promise<void> {
       stopScammerSync();
       stopCommandListener();
       stopNumberListener();
+      stopConfigListener();
       if (_alwaysOnlineInterval) { clearInterval(_alwaysOnlineInterval); _alwaysOnlineInterval = null; }
 
       // FIXED: Only wipe on loggedOut (515), NOT on 401
-      if (code === DisconnectReason.loggedOut || code === 515) {
-        console.error('[BOT] LOGGED OUT — wiping session');
-        if (fs.existsSync(SESSION_DIR)) fs.rmSync(SESSION_DIR, { recursive: true, force: true });
-        return;
-      }
+      if (code === DisconnectReason.loggedOut || code === 401) {
+          console.error('[BOT] Logged out (401) — wiping session + reconnecting');
+          if (fs.existsSync(SESSION_DIR)) fs.rmSync(SESSION_DIR, { recursive: true, force: true });
+          fs.mkdirSync(SESSION_DIR, { recursive: true });
+          _reconnectAttempts = 0;
+          setTimeout(async () => {
+            try { await connectSocket(); }
+            catch (err) { console.error('[BOT] reconnect failed:', err); }
+          }, 3_000);
+          return;
+        }
 
       if (_reconnectAttempts < MAX_RECONNECT) {
         _reconnectAttempts++;
