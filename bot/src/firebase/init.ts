@@ -1,5 +1,11 @@
 /**
- * Zbot — Firebase Init (Anonymous Auth with inMemoryPersistence)
+ * Zbot — Firebase Init (LAZY initialization)
+ *
+ * CRITICAL FIX: Firestore and RTDB are NOT initialized during bootstrap.
+ * They are lazily initialized ONLY when getDb()/getRtdb() is first called,
+ * which happens AFTER WhatsApp connection opens.
+ *
+ * This prevents gRPC connections from blocking the event loop during pairing.
  */
 
 import { initializeApp, type FirebaseApp } from 'firebase/app';
@@ -18,23 +24,31 @@ import { firebaseConfig } from './config';
 
 let _app: FirebaseApp | null = null;
 let _auth: Auth | null = null;
-let _db: Firestore | null = null;
-let _rtdb: Database | null = null;
+let _db: Firestore | null = null;      // LAZY — not initialized until getDb()
+let _rtdb: Database | null = null;      // LAZY — not initialized until getRtdb()
 let _deviceId: string | null = null;
 
-export function initFirebase(): { app: FirebaseApp; auth: Auth; db: Firestore; rtdb: Database } {
-  if (_app && _auth && _db && _rtdb) {
-    return { app: _app, auth: _auth, db: _db, rtdb: _rtdb };
+/**
+ * Initialize Firebase App + Auth ONLY.
+ * Does NOT initialize Firestore or RTDB — those are lazy.
+ */
+export function initFirebase(): { app: FirebaseApp; auth: Auth } {
+  if (_app && _auth) {
+    return { app: _app, auth: _auth };
   }
   _app = initializeApp(firebaseConfig);
   _auth = getAuth(_app);
-  _db = getFirestore(_app);
-  _rtdb = getDatabase(_app);
-  return { app: _app, auth: _auth, db: _db, rtdb: _rtdb };
+  // NOTE: Do NOT call getFirestore() or getDatabase() here!
+  // They establish gRPC connections that block the event loop during pairing.
+  return { app: _app, auth: _auth };
 }
 
+/**
+ * Sign in anonymously. Returns the UID (deviceId).
+ */
 export async function signInAnonymous(): Promise<string> {
   const { auth } = initFirebase();
+
   try {
     await setPersistence(auth, inMemoryPersistence);
   } catch (err) {
@@ -67,13 +81,29 @@ export function getDeviceId(): string {
   return _deviceId;
 }
 
+/**
+ * LAZY: Initialize Firestore on first call.
+ * This is called AFTER WhatsApp connection opens (from socket.ts).
+ */
 export function getDb(): Firestore {
-  if (!_db) throw new Error('Firebase not initialized.');
+  if (!_db) {
+    if (!_app) throw new Error('Firebase not initialized. Call initFirebase() first.');
+    console.log('[FIREBASE] Initializing Firestore (lazy)...');
+    _db = getFirestore(_app);
+  }
   return _db;
 }
 
+/**
+ * LAZY: Initialize RTDB on first call.
+ * This is called AFTER WhatsApp connection opens (from socket.ts).
+ */
 export function getRtdb(): Database {
-  if (!_rtdb) throw new Error('Firebase not initialized.');
+  if (!_rtdb) {
+    if (!_app) throw new Error('Firebase not initialized. Call initFirebase() first.');
+    console.log('[FIREBASE] Initializing RTDB (lazy)...');
+    _rtdb = getDatabase(_app);
+  }
   return _rtdb;
 }
 
