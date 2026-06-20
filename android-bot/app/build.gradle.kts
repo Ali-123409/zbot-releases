@@ -15,11 +15,18 @@ android {
         applicationId = "com.zbot.wa"
         minSdk = 26
         targetSdk = 34
-        versionCode = 9
-        versionName = "2.1.4"
+        versionCode = 10
+        versionName = "2.1.5"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
+
+        // v2.1.5: Only ship arm64-v8a — saves ~50-80MB by not bundling
+        // armeabi-v7a + x86_64 + x86. All modern Android phones (Android 8+)
+        // support arm64-v8a. FTGM does the same.
+        ndk {
+            abiFilters += "arm64-v8a"
+        }
 
         // AES passphrase — matches bot/encrypt.ts
         buildConfigField("String", "BUNDLE_PASSPHRASE", "\"Zbot2026SecureKey!@#xBot\"")

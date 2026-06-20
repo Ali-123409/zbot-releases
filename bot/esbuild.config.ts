@@ -19,7 +19,7 @@ const options: BuildOptions = {
   logLevel: 'info',
   define: { 'process.env.NODE_ENV': '"production"' },
   external: [
-    'sharp', 'fs', 'path', 'os', 'crypto', 'http', 'https', 'net', 'tls',
+    'fs', 'path', 'os', 'crypto', 'http', 'https', 'net', 'tls',
     'dns', 'url', 'querystring', 'stream', 'zlib', 'buffer', 'util',
     'events', 'child_process', 'worker_threads',
   ],

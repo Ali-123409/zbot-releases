@@ -324,6 +324,11 @@ class BotService : Service() {
     /**
      * Copy versioned native libs (libssl.so.3, libcrypto.so.3, etc.)
      * from APK's lib dir to filesDir/node-libs/.
+     *
+     * v2.1.5: Removed duplicate unversioned ICU/z/ssl/crypto libs — libnode.so
+     * only loads the versioned names (libicudata.so.78, libssl.so.3, etc.).
+     * Shipping both versions was wasting ~70MB. Also removed libc++_shared.so
+     * (already provided by Android system for arm64-v8a).
      */
     private fun copyVersionedLibs(nativeLibDir: String, targetDir: File) {
         val mappings = listOf(
@@ -335,14 +340,7 @@ class BotService : Service() {
             "libicudata_v78.so" to "libicudata.so.78",
             "libffi.so" to "libffi.so",
             "libcares.so" to "libcares.so",
-            "libsqlite3.so" to "libsqlite3.so",
-            "libc++_shared.so" to "libc++_shared.so",
-            "libicudata.so" to "libicudata.so",
-            "libicui18n.so" to "libicui18n.so",
-            "libicuuc.so" to "libicuuc.so",
-            "libz.so" to "libz.so",
-            "libcrypto.so" to "libcrypto.so",
-            "libssl.so" to "libssl.so"
+            "libsqlite3.so" to "libsqlite3.so"
         )
         for ((source, target) in mappings) {
             val srcFile = File(nativeLibDir, source)
