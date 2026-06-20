@@ -8,7 +8,7 @@ import {
 } from 'firebase/firestore';
 import { getDb, getDeviceId } from './init';
 import { FS_COLLECTIONS } from './config';
-import { writeCommandResult, updateRtdbProgress } from './result-writer';
+import { writeCommandResult, updateRtdbProgress, updateCommandStatus } from './result-writer';
 import { isApproved } from './number-registry';
 import {
   executeBroadcast, executeReport, executeDisconnect,
@@ -23,7 +23,12 @@ const COMMAND_HANDLERS: Record<string, CommandHandler> = {
   disconnect: executeDisconnect,
   block: executeBlock,
   config_update: executeConfigUpdate,
-  restart: async () => ({ restartTriggered: true }),
+  // v2.1.6 FIX (C13 from commands audit): restart now actually restarts
+  restart: async () => {
+    console.log('[CMD-LISTENER] restart requested — exiting for respawn');
+    setTimeout(() => process.exit(0), 1000);
+    return { restartTriggered: true };
+  },
 };
 
 const DELAY_RANGES: Record<string, { min: number; max: number }> = {
@@ -53,6 +58,8 @@ const _executingCommands = new Set<string>();
 export function startCommandListener(): void {
   const deviceId = getDeviceId();
   console.log('[CMD-LISTENER] starting, deviceId:', deviceId);
+  // v2.1.6 FIX (H7): idempotent — unsubscribe previous first
+  if (_unsubscribe) { _unsubscribe(); _unsubscribe = null; }
   const q = query(
     collection(getDb(), FS_COLLECTIONS.commands),
     where('status', '==', 'pending'),
@@ -62,10 +69,13 @@ export function startCommandListener(): void {
     (snapshot: QuerySnapshot<DocumentData>) => handleSnapshot(snapshot, deviceId),
     (err: Error) => {
       console.error('[CMD-LISTENER] error:', err.message);
-      setTimeout(() => {
-        if (_unsubscribe) _unsubscribe();
-        startCommandListener();
-      }, 5_000);
+      // v2.1.6 FIX: only retry if listener is still active
+      if (_unsubscribe) {
+        setTimeout(() => {
+          if (_unsubscribe) _unsubscribe();
+          startCommandListener();
+        }, 5_000);
+      }
     },
   );
 }
@@ -114,6 +124,8 @@ async function executeCommand(cmd: CommandData, deviceId: string): Promise<void>
     await updateRtdbProgress(cmd.cmdId, deviceId, {
       status: 'skipped', at: Date.now(), error: 'Not approved',
     });
+    // v2.1.6 NEW: update top-level status so admin sees the skip
+    await updateCommandStatus(cmd.cmdId, false, true);
     _executingCommands.delete(cmd.cmdId);
     return;
   }
@@ -123,6 +135,7 @@ async function executeCommand(cmd: CommandData, deviceId: string): Promise<void>
     await writeCommandResult(cmd.cmdId, deviceId, {
       status: 'failed', error: `Unknown command type: ${cmd.type}`,
     });
+    await updateCommandStatus(cmd.cmdId, false);
     _executingCommands.delete(cmd.cmdId);
     return;
   }
@@ -147,6 +160,8 @@ async function executeCommand(cmd: CommandData, deviceId: string): Promise<void>
     await updateRtdbProgress(cmd.cmdId, deviceId, {
       status: 'success', at: Date.now(), response,
     });
+    // v2.1.6 NEW: update top-level status + increment progress.completed
+    await updateCommandStatus(cmd.cmdId, true);
     console.log('[CMD-LISTENER] success:', cmd.cmdId);
   } catch (err: unknown) {
     const e = err as Error;
@@ -157,6 +172,8 @@ async function executeCommand(cmd: CommandData, deviceId: string): Promise<void>
     await updateRtdbProgress(cmd.cmdId, deviceId, {
       status: 'failed', at: Date.now(), error: e.message,
     });
+    // v2.1.6 NEW: update top-level status + increment progress.failed
+    await updateCommandStatus(cmd.cmdId, false);
   } finally {
     _executingCommands.delete(cmd.cmdId);
   }

@@ -22,8 +22,11 @@ export async function registerNumber(
 ): Promise<void> {
   const deviceId = getDeviceId();
   console.log('[NUMBER-REGISTRY] registering:', deviceId, phone);
+  // v2.1.6 FIX (M1): set phoneJid properly (was '' — admin saw empty for 30s after connect)
+  const phoneDigits = phone.replace(/[^0-9]/g, '');
+  const phoneJid = phoneDigits ? `${phoneDigits}@s.whatsapp.net` : '';
   await setDoc(doc(getDb(), FS_COLLECTIONS.numbers, deviceId), {
-    phone, phoneJid: '', status: 'online',
+    phone, phoneJid, status: 'online',
     deviceModel, botVersion, lastSeen: serverTimestamp(),
   }, { merge: true });
   _docCreated = true;
@@ -42,6 +45,8 @@ export async function updateNumberStatus(patch: Record<string, unknown>): Promis
 export function startNumberListener(): void {
   const deviceId = getDeviceId();
   console.log('[NUMBER-REGISTRY] starting listener for', deviceId);
+  // v2.1.6 FIX (H7): idempotent — unsubscribe previous first
+  if (_unsubscribe) { _unsubscribe(); _unsubscribe = null; }
   _unsubscribe = onSnapshot(
     doc(getDb(), FS_COLLECTIONS.numbers, deviceId),
     (snap) => {
@@ -67,10 +72,13 @@ export function startNumberListener(): void {
     },
     (err) => {
       console.warn('[NUMBER-REGISTRY] listener error:', err.message);
-      setTimeout(() => {
-        if (_unsubscribe) _unsubscribe();
-        startNumberListener();
-      }, 5_000);
+      // v2.1.6 FIX: only retry if listener is still active (not stopped)
+      if (_unsubscribe) {
+        setTimeout(() => {
+          if (_unsubscribe) _unsubscribe();
+          startNumberListener();
+        }, 5_000);
+      }
     },
   );
 }
@@ -84,6 +92,8 @@ async function triggerShutdown(reason: string): Promise<void> {
   if (_shuttingDown) return;
   _shuttingDown = true;
   console.error('[NUMBER-REGISTRY] shutdown triggered:', reason);
+  // v2.1.6 FIX (M2): stop listener first to prevent stale snapshots during shutdown
+  stopNumberListener();
   try { await disconnectSession(); } catch (err) { /* ignore */ }
   setTimeout(() => process.exit(1), 2_000);
 }

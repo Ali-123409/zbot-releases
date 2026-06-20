@@ -38,9 +38,8 @@
 -keep class com.zbot.wa.BotService { *; }
 -keep class com.zbot.wa.Crypto { *; }
 
-# Strip logging from release builds (saves ~500KB)
+# Strip verbose + debug logging in release (keep info — BotService pipes Node stdout via Log.i)
 -assumenosideeffects class android.util.Log {
     public static *** v(...);
     public static *** d(...);
-    public static *** i(...);
 }

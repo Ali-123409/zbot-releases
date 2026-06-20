@@ -25,7 +25,7 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideBotRepository(ctx: Context): BotRepository = BotRepository(ctx)
+    fun provideBotRepository(): BotRepository = BotRepository()
 
     @Provides
     @Singleton

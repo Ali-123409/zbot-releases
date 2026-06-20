@@ -50,7 +50,7 @@ fun StatusScreen(
         while (true) {
             try {
                 val client = OkHttpClient()
-                val req = Request.Builder().url("http://localhost:3001/status").build()
+                val req = Request.Builder().url("http://127.0.0.1:3001/status").build()
                 val resp = withContext(Dispatchers.IO) { client.newCall(req).execute() }
                 if (resp.isSuccessful) {
                     val json = JSONObject(resp.body!!.string())
@@ -143,7 +143,7 @@ fun StatusScreen(
                             withContext(Dispatchers.IO) {
                                 val client = OkHttpClient()
                                 val req = Request.Builder()
-                                    .url("http://localhost:3001/disconnect")
+                                    .url("http://127.0.0.1:3001/disconnect")
                                     .build()
                                 client.newCall(req).execute()
                             }
@@ -193,7 +193,7 @@ fun StatusScreen(
                         scope.launch {
                             try {
                                 val client = OkHttpClient()
-                                val req = Request.Builder().url("http://localhost:3001/logs").build()
+                                val req = Request.Builder().url("http://127.0.0.1:3001/logs").build()
                                 val resp = withContext(Dispatchers.IO) { client.newCall(req).execute() }
                                 if (resp.isSuccessful) {
                                     val json = JSONObject(resp.body!!.string())
@@ -233,7 +233,7 @@ fun StatusScreen(
                         scope.launch {
                             try {
                                 val client = OkHttpClient()
-                                val req = Request.Builder().url("http://localhost:3001/logs").build()
+                                val req = Request.Builder().url("http://127.0.0.1:3001/logs").build()
                                 val resp = withContext(Dispatchers.IO) { client.newCall(req).execute() }
                                 if (resp.isSuccessful) {
                                     val json = JSONObject(resp.body!!.string())

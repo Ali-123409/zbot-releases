@@ -7,6 +7,7 @@ export const antidelete: CommandModule = {
   aliases: ['antidel'],
   description: 'Toggle restore of deleted messages',
   category: 'privacy',
+  ownerOnly: true,
   handler: async (ctx: CommandContext) => await toggleSetting(ctx, 'antiDelete', 'Anti-Delete'),
 };
 
@@ -14,6 +15,7 @@ export const antiedit: CommandModule = {
   command: 'antiedit',
   description: 'Toggle restore of edited messages',
   category: 'privacy',
+  ownerOnly: true,
   handler: async (ctx: CommandContext) => await toggleSetting(ctx, 'antiEdit', 'Anti-Edit'),
 };
 
@@ -22,6 +24,7 @@ export const autoseen: CommandModule = {
   aliases: ['autostatus', 'statusview'],
   description: 'Toggle auto-view of statuses',
   category: 'privacy',
+  ownerOnly: true,
   handler: async (ctx: CommandContext) => await toggleSetting(ctx, 'autoStatusSeen', 'Auto Status Seen'),
 };
 
@@ -30,6 +33,7 @@ export const autostatusreact: CommandModule = {
   aliases: ['statusreact', 'asr'],
   description: 'Toggle auto-react to statuses',
   category: 'privacy',
+  ownerOnly: true,
   handler: async (ctx: CommandContext) => {
     const { sock, msg, chatJid, args } = ctx;
     const cfg = getConfig();
@@ -50,6 +54,7 @@ export const anticall: CommandModule = {
   command: 'anticall',
   description: 'Toggle auto-reject of incoming calls',
   category: 'privacy',
+  ownerOnly: true,
   handler: async (ctx: CommandContext) => await toggleSetting(ctx, 'antiCall', 'Anti-Call'),
 };
 
@@ -58,6 +63,7 @@ export const alwaysonline: CommandModule = {
   aliases: ['online'],
   description: 'Toggle always-online presence',
   category: 'privacy',
+  ownerOnly: true,
   handler: async (ctx: CommandContext) => {
     const { sock, msg, chatJid } = ctx;
     const cfg = getConfig();
@@ -76,6 +82,7 @@ export const mode: CommandModule = {
   aliases: ['public', 'private'],
   description: 'Toggle public/private mode',
   category: 'privacy',
+  ownerOnly: true,
   handler: async (ctx: CommandContext) => {
     const { sock, msg, chatJid, args } = ctx;
     const cfg = getConfig();

@@ -1,3 +1,12 @@
+/**
+ * Zbot v2.1.6 — Broadcast command
+ *
+ * Fixes:
+ * - text + attachment: text is now used as caption fallback (was silently dropped — C7)
+ * - fileName vs caption separated (was conflated — C8)
+ * - audio PTT is opt-in (was hardcoded true — M6)
+ */
+
 import type { CommandData } from '../firebase/command-listener';
 import { getSocket } from '../socket';
 
@@ -6,6 +15,8 @@ interface BroadcastPayload {
   attachmentBase64?: string;
   attachmentMime?: string;
   attachmentCaption?: string;
+  attachmentFileName?: string;
+  attachmentIsPtt?: boolean;
 }
 
 export async function executeBroadcast(
@@ -25,27 +36,35 @@ export async function executeBroadcast(
   const targetJid = targetPhone + '@s.whatsapp.net';
 
   const msg: Record<string, unknown> = {};
-  if (payload.message) msg.text = payload.message;
 
   if (payload.attachmentBase64) {
     const buffer = Buffer.from(payload.attachmentBase64, 'base64');
     const mime = payload.attachmentMime || 'application/octet-stream';
+    // v2.1.6 FIX (C7): use message as caption fallback when no explicit caption
+    const caption = payload.attachmentCaption || payload.message || '';
+
     if (mime.startsWith('image/')) {
       msg.image = buffer;
-      if (payload.attachmentCaption) msg.caption = payload.attachmentCaption;
+      if (caption) msg.caption = caption;
     } else if (mime.startsWith('video/')) {
       msg.video = buffer;
       msg.mimetype = mime;
-      if (payload.attachmentCaption) msg.caption = payload.attachmentCaption;
+      if (caption) msg.caption = caption;
     } else if (mime.startsWith('audio/')) {
       msg.audio = buffer;
       msg.mimetype = mime;
-      msg.ptt = true;
+      // v2.1.6 FIX (M6): PTT opt-in (was hardcoded true)
+      msg.ptt = payload.attachmentIsPtt === true;
     } else {
       msg.document = buffer;
       msg.mimetype = mime;
-      msg.fileName = payload.attachmentCaption || 'file';
+      // v2.1.6 FIX (C8): fileName is separate from caption
+      msg.fileName = payload.attachmentFileName || 'file';
+      if (caption) msg.caption = caption;
     }
+  } else {
+    // No attachment — just text
+    msg.text = payload.message;
   }
 
   const sent = await sock.sendMessage(targetJid, msg as any);

@@ -34,7 +34,7 @@ import { initFirebase, signInAnonymous } from './firebase/init';
 import { startBot, stopBot } from './socket';
 import { startHttpServer } from './http/server';
 import { registerCommands } from './commands/_registry';
-import { startConfigListener, stopConfigListener } from './firebase/config-runtime';
+import { stopConfigListener } from './firebase/config-runtime';
 
 import { menu } from './commands/menu';
 import { ping } from './commands/ping';
@@ -70,13 +70,13 @@ registerCommands([
 ]);
 
 async function bootstrap(): Promise<void> {
-  const ver = process.env.BOT_VERSION || '2.1.4';
+  const ver = process.env.BOT_VERSION || '2.1.6';
   console.log('========================================');
   console.log('  Zbot v' + ver + ' — starting up');
   console.log('========================================');
   console.log('  Node version:', process.version);
   console.log('  BOT_DATA_DIR:', process.env.BOT_DATA_DIR || '(not set)');
-  console.log('  BOT_VERSION:', process.env.BOT_VERSION || '2.1.4');
+  console.log('  BOT_VERSION:', process.env.BOT_VERSION || '2.1.6');
   console.log('  Has globalThis.crypto:', typeof globalThis.crypto);
   console.log('  Has crypto.subtle:', typeof (globalThis.crypto as any)?.subtle);
   console.log('');
@@ -99,11 +99,11 @@ async function bootstrap(): Promise<void> {
     return;
   }
 
-  console.log('[BOOT] starting config listener...');
-  try { startConfigListener(); }
-  catch (err) { console.warn('[BOOT] config listener failed:', err); }
-
   console.log('[BOOT] starting Baileys socket...');
+  // v2.1.6 FIX (C3): removed startConfigListener() call here — it was:
+  //   1. Violating the lazy-init pattern (Firestore gRPC during pairing)
+  //   2. Leaking listeners (handleSocketOpen also calls startConfigListener)
+  // startConfigListener is now ONLY called from handleSocketOpen after connect.
   try { await startBot(deviceId); }
   catch (err) { console.error('[BOOT] Baileys start failed:', err); }
 

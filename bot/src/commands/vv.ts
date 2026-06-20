@@ -6,6 +6,7 @@ export const vv: CommandModule = {
   aliases: ['ok'],
   description: 'Reveal view-once media silently',
   category: 'utility',
+  ownerOnly: true,  // v2.1.6 FIX (H10): privacy — owner only
   handler: async (ctx) => {
     const { sock, msg, chatJid } = ctx;
     const contextInfo = msg.message?.extendedTextMessage?.contextInfo;

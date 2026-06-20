@@ -8,6 +8,7 @@ export const dp: CommandModule = {
   aliases: ['getdp', 'pp', 'pfp', 'getpp'],
   description: 'Download profile picture of a user (reply or @mention)',
   category: 'media',
+  ownerOnly: true,  // v2.1.6 FIX (H11): stalking vector — owner only
   handler: async (ctx: CommandContext) => {
     const { sock, msg, chatJid } = ctx;
     let targetJid: string | undefined = msg.message?.extendedTextMessage?.contextInfo?.participant || undefined;
@@ -41,6 +42,7 @@ export const save: CommandModule = {
   aliases: ['statussave', 'dl'],
   description: 'Save a status message (reply to status)',
   category: 'media',
+  ownerOnly: true,  // v2.1.6 FIX (H10): privacy — owner only
   handler: async (ctx: CommandContext) => {
     const { sock, msg, chatJid } = ctx;
     const quoted = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage as any;
@@ -108,14 +110,15 @@ export const tovoice: CommandModule = {
   handler: async (ctx: CommandContext) => {
     const { sock, msg, chatJid } = ctx;
     const quoted = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage as any;
-    if (!quoted?.audioMessage && !quoted?.audio) {
+    // v2.1.6 FIX (M4): removed redundant !quoted?.audio check (Baileys uses audioMessage)
+    if (!quoted?.audioMessage) {
       await sock.sendMessage(chatJid, {
         text: '⚠️ Reply to an audio message to convert it.',
       }, { quoted: msg });
       return;
     }
     try {
-      const audioMsg = quoted.audioMessage || quoted.audio;
+      const audioMsg = quoted.audioMessage;
       const stream = await downloadContentFromMessage(audioMsg, 'audio');
       const chunks: Buffer[] = [];
       for await (const chunk of stream) chunks.push(chunk);
@@ -136,10 +139,11 @@ export const block: CommandModule = {
   aliases: ['unblock'],
   description: 'Block/unblock a user (reply or @mention)',
   category: 'admin',
+  ownerOnly: true,  // v2.1.6 FIX (H15): admin action — owner only
   handler: async (ctx: CommandContext) => {
-    const { sock, msg, chatJid, args } = ctx;
-    const cmd = msg.message?.conversation || msg.message?.extendedTextMessage?.text || '';
-    const isUnblock = cmd.toLowerCase().startsWith('.unblock');
+    const { sock, msg, chatJid, args, invokedAs } = ctx;
+    // v2.1.6 FIX (C3): use invokedAs from context instead of raw text parsing
+    const isUnblock = invokedAs === 'unblock';
     let targetJid: string | undefined = msg.message?.extendedTextMessage?.contextInfo?.participant || undefined;
     if (!targetJid && msg.message?.extendedTextMessage?.contextInfo?.mentionedJid?.length) {
       targetJid = msg.message.extendedTextMessage.contextInfo.mentionedJid[0];
@@ -173,6 +177,7 @@ export const setpp: CommandModule = {
   aliases: ['setpfp', 'setdp', 'setprofilepic'],
   description: 'Set bot\'s profile picture (reply to an image)',
   category: 'admin',
+  ownerOnly: true,  // v2.1.6 FIX: admin action
   handler: async (ctx: CommandContext) => {
     const { sock, msg, chatJid } = ctx;
     const quoted = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage as any;
@@ -182,12 +187,17 @@ export const setpp: CommandModule = {
       }, { quoted: msg });
       return;
     }
+    // v2.1.6 FIX (H12): guard against undefined sock.user
+    if (!sock.user?.id) {
+      await sock.sendMessage(chatJid, { text: '❌ Bot not ready.' }, { quoted: msg });
+      return;
+    }
     try {
       const stream = await downloadContentFromMessage(quoted.imageMessage, 'image');
       const chunks: Buffer[] = [];
       for await (const chunk of stream) chunks.push(chunk);
       const buffer = Buffer.concat(chunks);
-      await sock.updateProfilePicture(sock.user!.id, buffer);
+      await sock.updateProfilePicture(sock.user.id, buffer);
       await sock.sendMessage(chatJid, { text: '✅ Profile picture updated!' }, { quoted: msg });
     } catch (err) {
       await sock.sendMessage(chatJid, {
@@ -202,6 +212,7 @@ export const kickall: CommandModule = {
   aliases: ['removeall'],
   description: 'Kick everyone from the current group (use with caution)',
   category: 'admin',
+  ownerOnly: true,  // v2.1.6 FIX: admin action
   groupOnly: true,
   handler: async (ctx: CommandContext) => {
     const { sock, msg, chatJid } = ctx;
@@ -211,10 +222,11 @@ export const kickall: CommandModule = {
     }
     try {
       const metadata = await sock.groupMetadata(chatJid);
+      // v2.1.6 FIX (C15): correct bot exclusion — use normalized participant JID
       const botNumber = sock.user?.id?.split(':')[0]?.split('@')[0] || '';
-      const botJid = sock.user?.id || '';
+      const botParticipantJid = botNumber + '@s.whatsapp.net';
       const toKick = metadata.participants
-        .filter(p => p.id !== botJid && !p.id.startsWith(botNumber))
+        .filter(p => p.id !== botParticipantJid && p.id !== sock.user?.id)
         .map(p => p.id);
       if (toKick.length === 0) {
         await sock.sendMessage(chatJid, { text: 'ℹ️ No users to kick.' }, { quoted: msg });
@@ -237,11 +249,13 @@ export const antitagall: CommandModule = {
   aliases: ['antitag'],
   description: 'Toggle anti-tag-all (warn members who @everyone)',
   category: 'admin',
+  ownerOnly: true,  // v2.1.6 FIX: admin action
   groupOnly: true,
   handler: async (ctx: CommandContext) => {
-    const { sock, msg, chatJid } = ctx;
+    const { sock, msg, chatJid, args } = ctx;
     const cfg = getConfig();
-    const val = parseToggle(msg.message?.extendedTextMessage?.text?.split(/\s+/)[1]);
+    // v2.1.6 FIX (C5): use ctx.args instead of raw text parsing
+    const val = parseToggle(args[0]);
     let enabled: boolean;
     if (val === null) enabled = !cfg.groups.antiTagAll.includes(chatJid);
     else enabled = val;
@@ -260,11 +274,13 @@ export const antilink: CommandModule = {
   command: 'antilink',
   description: 'Toggle anti-link (auto-delete links in this group)',
   category: 'admin',
+  ownerOnly: true,  // v2.1.6 FIX: admin action
   groupOnly: true,
   handler: async (ctx: CommandContext) => {
-    const { sock, msg, chatJid } = ctx;
+    const { sock, msg, chatJid, args } = ctx;
     const cfg = getConfig();
-    const val = parseToggle(msg.message?.extendedTextMessage?.text?.split(/\s+/)[1]);
+    // v2.1.6 FIX (C5): use ctx.args
+    const val = parseToggle(args[0]);
     let enabled: boolean;
     if (val === null) enabled = !cfg.groups.antiLink.includes(chatJid);
     else enabled = val;

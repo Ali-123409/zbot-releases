@@ -161,19 +161,32 @@ class SocketManager {
   }
 
   /**
-   * If session dir exists but is stale (older than 1h AND we have never connected),
+   * If session dir exists but is stale (last modified > 24h AND we have never connected),
    * wipe it. This prevents reconnect loops with partial creds from failed pairings.
+   *
+   * v2.1.6 FIX: previously checked the directory mtime (which doesn't update when files
+   * inside are modified) and used 1h threshold (too aggressive — wiped valid sessions
+   * after a few hours of downtime). Now checks the newest file inside the dir.
    */
   private maybeWipeStaleSession(): void {
     if (!fs.existsSync(SESSION_DIR)) return;
-    const stat = fs.statSync(SESSION_DIR);
-    const ageMs = Date.now() - stat.mtimeMs;
-    // If dir is empty (no creds), nothing to wipe
     const entries = fs.readdirSync(SESSION_DIR);
     if (entries.length === 0) return;
-    // If we're not connected and dir is older than 1h, treat as stale
-    if (!this.state.ready && ageMs > 3_600_000) {
-      console.warn('[BOT] wiping stale session dir (age:', Math.round(ageMs / 1000), 's)');
+
+    // Find newest file mtime inside session dir (dir mtime doesn't track child writes)
+    let newestMtime = 0;
+    for (const entry of entries) {
+      try {
+        const stat = fs.statSync(path.join(SESSION_DIR, entry));
+        if (stat.mtimeMs > newestMtime) newestMtime = stat.mtimeMs;
+      } catch (e) { /* ignore */ }
+    }
+    if (newestMtime === 0) return;
+
+    const ageMs = Date.now() - newestMtime;
+    // Only wipe if older than 24h (was 1h — too aggressive)
+    if (ageMs > 86_400_000) {
+      console.warn('[BOT] wiping stale session dir (age:', Math.round(ageMs / 1000 / 60), 'min)');
       this.wipeSession();
     }
   }
@@ -313,6 +326,17 @@ class SocketManager {
   }
 
   private async handleSocketOpen(sock: WASocket): Promise<void> {
+    // v2.1.6 FIX (M4): guard against sock.user being null on 'open' (race in Baileys)
+    if (!sock.user?.id) {
+      console.warn('[BOT] open fired without sock.user — waiting 2s for population');
+      await new Promise(r => setTimeout(r, 2000));
+      if (!sock.user?.id) {
+        console.error('[BOT] sock.user still null after wait — aborting handleSocketOpen');
+        this.state.ready = false;
+        return;
+      }
+    }
+
     this.state.ready = true;
     this.state.currentQR = null;
     this.state.currentPairingCode = null;
@@ -322,19 +346,30 @@ class SocketManager {
 
     const phone = '+' + (sock.user?.id?.split(':')[0]?.split('@')[0] || '?');
     const deviceModel = process.env.BOT_DEVICE_MODEL || 'Android';
-    const botVersion = process.env.BOT_VERSION || '2.1.4';
+    const botVersion = process.env.BOT_VERSION || '2.1.6';
     console.log('[BOT] Connected:', phone);
 
-    try {
-      await registerNumber(phone, deviceModel, botVersion);
-      startNumberListener();
-      startConfigListener();
-      startStatusReporter({ phone, deviceModel, botVersion });
-      startScammerSync();
-      startCommandListener();
-    } catch (error) {
-      console.error('[BOT] Failed to start services:', error);
-    }
+    // v2.1.6 FIX (H6): start each service independently so one failure
+    // doesn't kill the others. registerNumber failing should not block
+    // status reporter or command listener.
+    try { await registerNumber(phone, deviceModel, botVersion); }
+    catch (err) { console.error('[BOT] registerNumber failed:', (err as Error).message); }
+
+    try { startNumberListener(); }
+    catch (err) { console.error('[BOT] number listener failed:', (err as Error).message); }
+
+    try { startConfigListener(); }
+    catch (err) { console.error('[BOT] config listener failed:', (err as Error).message); }
+
+    try { startStatusReporter({ phone, deviceModel, botVersion }); }
+    catch (err) { console.error('[BOT] status reporter failed:', (err as Error).message); }
+
+    try { startScammerSync(); }
+    catch (err) { console.error('[BOT] scammer sync failed:', (err as Error).message); }
+
+    try { startCommandListener(); }
+    catch (err) { console.error('[BOT] command listener failed:', (err as Error).message); }
+
     this.startAlwaysOnline(sock);
   }
 
@@ -355,19 +390,13 @@ class SocketManager {
       return;
     }
 
-    // 401/403 (auth error): retry WITHOUT wiping (creds might still be valid)
-    // FIX (Bug G): was wiping session on 401, losing possibly-valid creds
+    // 401/403 (auth error): creds are invalid — wipe immediately and reconnect fresh
+    // v2.1.6 FIX: was retrying without wipe 5 times (wasting 15s before inevitable recovery)
     if (this.isAuthError(code)) {
-      console.warn('[BOT] Auth error (', code, ') — retrying without wipe');
-      this.state.reconnectAttempts++;
-      if (this.state.reconnectAttempts <= CONFIG.MAX_RECONNECT) {
-        await this.reconnect(3000);
-      } else {
-        console.error('[BOT] Max auth-error reconnect attempts reached — wiping');
-        this.wipeSession();
-        this.state.reconnectAttempts = 0;
-        await this.reconnect(5000);
-      }
+      console.warn('[BOT] Auth error (', code, ') — creds invalid, wiping + reconnecting');
+      this.wipeSession();
+      this.state.reconnectAttempts = 0;
+      await this.reconnect(3000);
       return;
     }
 
@@ -433,8 +462,12 @@ class SocketManager {
 
       // 7. Request pairing code
       console.log('[BOT] Requesting pairing code...');
-      const code = await newSock.requestPairingCode(cleaned);
-      this.state.currentPairingCode = code?.match(/.{1,4}/g)?.join('-') || code;
+      const rawCode = await newSock.requestPairingCode(cleaned);
+      // v2.1.6 FIX (H5): validate non-empty before formatting
+      if (!rawCode) {
+        throw new Error('Baileys returned empty pairing code');
+      }
+      this.state.currentPairingCode = rawCode.match(/.{1,4}/g)?.join('-') || rawCode;
       console.log('[BOT] Pairing code:', this.state.currentPairingCode);
       console.log('[BOT] >>> Open WhatsApp → Settings → Linked Devices → Link with phone number');
       console.log('[BOT] >>> Enter the code above. Bot will auto-connect when paired.');
@@ -452,6 +485,14 @@ class SocketManager {
       this.state.sock = null;
       this.state.pairingInProgress = false;
       this.clearPairingLock();
+      // v2.1.6 FIX (C2): recreate the regular socket so the bot can recover
+      // and /pair can be retried. Without this, state.sock stays null forever
+      // and waitForSocketReady never returns true.
+      setTimeout(() => {
+        this.connectSocket().catch(err => {
+          console.error('[BOT] post-pair-fail reconnect failed:', err);
+        });
+      }, 1000);
       throw new Error('Failed to get pairing code: ' + (error as Error).message);
     }
     // NOTE: No finally block here. pairingInProgress is reset by:
@@ -684,10 +725,12 @@ class SocketManager {
   private extractText(msg: proto.IWebMessageInfo): string {
     if (!msg.message) return '';
     let m: any = msg.message;
-    if (m.ephemeralMessage) m = m.ephemeralMessage.message;
-    if (m.viewOnceMessageV2) m = m.viewOnceMessageV2.message;
-    if (m.viewOnceMessage) m = m.viewOnceMessage.message;
-    if (m.documentWithCaptionMessage) m = m.documentWithCaptionMessage.message;
+    // v2.1.6 FIX (M5): guard each reassignment against undefined inner .message
+    if (m.ephemeralMessage?.message) m = m.ephemeralMessage.message;
+    if (m.viewOnceMessageV2?.message) m = m.viewOnceMessageV2.message;
+    if (m.viewOnceMessage?.message) m = m.viewOnceMessage.message;
+    if (m.documentWithCaptionMessage?.message) m = m.documentWithCaptionMessage.message;
+    if (!m) return '';
     if (m.conversation) return m.conversation;
     if (m.extendedTextMessage?.text) return m.extendedTextMessage.text;
     if (m.imageMessage?.caption) return m.imageMessage.caption;
@@ -754,6 +797,22 @@ class SocketManager {
       await this.connectSocket();
     } catch (error) {
       console.error('[BOT] Reconnect failed:', error);
+      // v2.1.6 FIX (H7): schedule another reconnect so the bot doesn't brick
+      this.state.reconnectAttempts++;
+      if (this.state.reconnectAttempts < CONFIG.MAX_RECONNECT) {
+        const nextDelay = Math.min(
+          CONFIG.RECONNECT_BASE_DELAY * Math.pow(2, this.state.reconnectAttempts),
+          CONFIG.RECONNECT_MAX_DELAY,
+        );
+        console.log(`[BOT] Scheduling reconnect #${this.state.reconnectAttempts} in ${nextDelay}ms`);
+        setTimeout(() => { this.reconnect(nextDelay).catch(() => {}); }, 0);
+      } else {
+        console.error('[BOT] Max reconnect attempts reached after connectSocket failure');
+        // Last resort: wipe and try once more
+        this.wipeSession();
+        this.state.reconnectAttempts = 0;
+        setTimeout(() => { this.reconnect(5000).catch(() => {}); }, 0);
+      }
     }
   }
 

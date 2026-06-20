@@ -1,6 +1,5 @@
 package com.zbot.wa.data
 
-import android.content.Context
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
 import com.zbot.wa.data.FirebaseConfig
@@ -9,9 +8,13 @@ import kotlinx.coroutines.tasks.await
 /**
  * Repository for Firestore operations (admin side).
  *
- * All operations require caller to be authenticated as admin (verified via rules).
+ * v2.1.6 FIXES:
+ * - createdAt/lastSeen now read as Timestamp (was getLong → always 0 — C2)
+ * - progress.completed/failed/total cast as Long → Int (was Int → always null → 0 — C1)
+ * - commands.status now reads from Firestore (bot updates it via updateCommandStatus — C3)
+ * - Removed unused context constructor (M4)
  */
-class BotRepository(private val context: Context) {
+class BotRepository {
 
     private val db: FirebaseFirestore by lazy { FirebaseFirestore.getInstance() }
 
@@ -19,7 +22,6 @@ class BotRepository(private val context: Context) {
     // Numbers
     // -------------------------------------------------------------------
 
-    /** List all registered numbers (pending + online + offline + banned). */
     suspend fun listNumbers(): List<NumberRecord> {
         val snap = db.collection("numbers")
             .orderBy("lastSeen", Query.Direction.DESCENDING)
@@ -34,27 +36,25 @@ class BotRepository(private val context: Context) {
                 approved = doc.getBoolean("approved") ?: false,
                 deviceModel = doc.getString("deviceModel") ?: "",
                 botVersion = doc.getString("botVersion") ?: "",
-                createdAt = doc.getLong("createdAt") ?: 0L,
-                lastSeen = doc.getLong("lastSeen") ?: 0L,
+                // v2.1.6 FIX (C2): use getTimestamp (was getLong → always 0)
+                createdAt = doc.getTimestamp("createdAt")?.toDate()?.time ?: 0L,
+                lastSeen = doc.getTimestamp("lastSeen")?.toDate()?.time ?: 0L,
             )
         }
     }
 
-    /** Approve a number — sets approved=true so it can receive commands. */
     suspend fun approveNumber(deviceId: String) {
         db.collection("numbers").document(deviceId)
             .update("approved", true)
             .await()
     }
 
-    /** Revoke a number — sets status=revoked so bot auto-shuts down. */
     suspend fun revokeNumber(deviceId: String) {
         db.collection("numbers").document(deviceId)
             .update("status", "revoked")
             .await()
     }
 
-    /** Delete a number record entirely. */
     suspend fun deleteNumber(deviceId: String) {
         db.collection("numbers").document(deviceId).delete().await()
     }
@@ -63,14 +63,13 @@ class BotRepository(private val context: Context) {
     // Commands
     // -------------------------------------------------------------------
 
-    /** Create a broadcast command (admin → all numbers → target client). */
     suspend fun createBroadcast(
         target: String,
         message: String,
         attachmentBase64: String? = null,
         attachmentMime: String? = null,
         attachmentCaption: String? = null,
-        targetDeviceIds: List<String>? = null, // null = all
+        targetDeviceIds: List<String>? = null,
     ): String {
         val payload = hashMapOf<String, Any?>(
             "message" to message,
@@ -95,7 +94,6 @@ class BotRepository(private val context: Context) {
         return ref.id
     }
 
-    /** Create a report-scammer command. */
     suspend fun createReport(
         scammerPhone: String,
         reason: String,
@@ -124,7 +122,6 @@ class BotRepository(private val context: Context) {
         return ref.id
     }
 
-    /** Create a disconnect command. */
     suspend fun createDisconnect(targetDeviceIds: List<String>? = null): String {
         val data = hashMapOf<String, Any?>(
             "type" to "disconnect",
@@ -138,7 +135,6 @@ class BotRepository(private val context: Context) {
         return ref.id
     }
 
-    /** List recent commands (for history view). */
     suspend fun listRecentCommands(limit: Long = 50): List<CommandRecord> {
         val snap = db.collection("commands")
             .orderBy("createdAt", Query.Direction.DESCENDING)
@@ -146,15 +142,19 @@ class BotRepository(private val context: Context) {
             .get()
             .await()
         return snap.documents.map { doc ->
+            val progressMap = doc.get("progress") as? Map<*, *>
+            // v2.1.6 FIX (C1): cast as Long → Int (Firestore stores numbers as Long)
             CommandRecord(
                 cmdId = doc.id,
                 type = doc.getString("type") ?: "",
                 target = doc.getString("target") ?: "",
-                status = doc.getString("status") ?: "",
-                createdAt = doc.getLong("createdAt") ?: 0L,
-                progressTotal = (doc.get("progress") as? Map<*, *>)?.get("total") as? Int ?: 0,
-                progressCompleted = (doc.get("progress") as? Map<*, *>)?.get("completed") as? Int ?: 0,
-                progressFailed = (doc.get("progress") as? Map<*, *>)?.get("failed") as? Int ?: 0,
+                // v2.1.6 FIX (C3): status now updated by bot (was always "pending")
+                status = doc.getString("status") ?: "pending",
+                // v2.1.6 FIX (C2): use getTimestamp instead of getLong
+                createdAt = doc.getTimestamp("createdAt")?.toDate()?.time ?: 0L,
+                progressTotal = (progressMap?.get("total") as? Long)?.toInt() ?: 0,
+                progressCompleted = (progressMap?.get("completed") as? Long)?.toInt() ?: 0,
+                progressFailed = (progressMap?.get("failed") as? Long)?.toInt() ?: 0,
             )
         }
     }
@@ -163,7 +163,6 @@ class BotRepository(private val context: Context) {
     // Scammers
     // -------------------------------------------------------------------
 
-    /** List all reported scammers. */
     suspend fun listScammers(): List<ScammerRecord> {
         val snap = db.collection("scammers")
             .orderBy("lastReportedAt", Query.Direction.DESCENDING)
@@ -182,14 +181,12 @@ class BotRepository(private val context: Context) {
         }
     }
 
-    /** Mark a scammer as cleared (false positive). */
     suspend fun clearScammer(phone: String) {
         db.collection("scammers").document(phone)
             .update("status", "cleared")
             .await()
     }
 
-    /** Add notes to a scammer record. */
     suspend fun updateScammerNotes(phone: String, notes: String) {
         db.collection("scammers").document(phone)
             .update("notes", notes)
@@ -230,3 +227,4 @@ data class ScammerRecord(
     val status: String,
     val notes: String,
 )
+

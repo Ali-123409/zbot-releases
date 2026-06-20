@@ -26,13 +26,16 @@ const _scammerMap = new Map<string, Scammer>();
 let _unsubscribe: (() => void) | null = null;
 
 export function startScammerSync(): void {
+  // v2.1.6 FIX (H7 from firebase audit): idempotent — unsubscribe previous first
+  if (_unsubscribe) { _unsubscribe(); _unsubscribe = null; }
   console.log('[SCAMMER-SYNC] starting listener');
   _unsubscribe = onSnapshot(
     collection(getDb(), FS_COLLECTIONS.scammers),
     (snapshot: QuerySnapshot<DocumentData>) => {
       snapshot.docChanges().forEach((change) => {
         const data = change.doc.data() as Scammer;
-        const phone = change.doc.id;
+        // v2.1.6 FIX (C1): normalize doc ID to +digits format to match lookup key
+        const phone = normalizePhone(change.doc.id) || change.doc.id;
         if (change.type === 'removed') {
           _scammerMap.delete(phone);
         } else {
@@ -47,10 +50,13 @@ export function startScammerSync(): void {
     },
     (err: Error) => {
       console.error('[SCAMMER-SYNC] error:', err.message);
-      setTimeout(() => {
-        if (_unsubscribe) _unsubscribe();
-        startScammerSync();
-      }, 5_000);
+      // v2.1.6 FIX: only retry if still active (not stopped)
+      if (_unsubscribe) {
+        setTimeout(() => {
+          if (_unsubscribe) _unsubscribe();
+          startScammerSync();
+        }, 5_000);
+      }
     },
   );
 }

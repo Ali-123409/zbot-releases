@@ -34,7 +34,7 @@ service cloud.firestore {
       allow update: if isAdmin() || (
         isBot()
         && request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(['totalReports', 'reportedBy', 'lastReportedAt', 'status'])
+          .hasOnly(['totalReports', 'reportedBy', 'lastReportedAt', 'status', 'notes', 'evidenceIds', 'displayName'])
         && request.resource.data.status == 'active'
       );
       allow delete: if isAdmin();
@@ -42,18 +42,44 @@ service cloud.firestore {
 
     match /commands/{cmdId} {
       allow read: if isAdmin() || isBot();
-      allow create, update, delete: if isAdmin();
+      // v2.1.6: allow bot to update status + progress fields (for command completion tracking)
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() || (
+        isBot()
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['status', 'progress'])
+      );
     }
 
-    match /commandResults/{cmdId}/{deviceId} {
+    // v2.1.6 FIX: correct path to match result-writer.ts (4 segments)
+    match /commandResults/{cmdId} {
       allow read: if isAdmin();
-      allow create, update: if isOwnDevice(deviceId);
-      allow delete: if isAdmin();
+      allow create: if isBot();
+      match /devices/{deviceId} {
+        allow read: if isAdmin() || isOwnDevice(deviceId);
+        allow create, update: if isOwnDevice(deviceId);
+        allow delete: if isAdmin();
+      }
     }
 
+    // v2.1.6 FIX: allow bot to write its own config (with field whitelist)
     match /configs/{deviceId} {
       allow read: if isAdmin() || isOwnDevice(deviceId);
-      allow write: if isAdmin();
+      allow create: if isOwnDevice(deviceId);
+      allow update: if isAdmin() || (
+        isOwnDevice(deviceId)
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly([
+            'botName', 'ownerName', 'ownerNumber', 'prefix', 'botVersion', 'mode',
+            'channelJid', 'channelLink', 'forwardScore',
+            'antiDelete', 'antiDeleteStatus', 'antiEdit',
+            'autoStatusSeen', 'autoStatusReact', 'autoStatusEmoji',
+            'antiViewOnce', 'antiCall', 'alwaysOnline',
+            'autoReacts', 'autoReactsEmoji', 'autoReply', 'autoReplyCommands',
+            'customMenu', 'menuImage', 'groups'
+          ])
+      );
+      allow delete: if isAdmin();
     }
 
     match /adminLogs/{logId} {

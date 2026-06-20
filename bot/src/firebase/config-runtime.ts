@@ -73,6 +73,10 @@ export async function persistConfig(): Promise<void> {
 
 export function startConfigListener(): void {
   const deviceId = getDeviceId();
+  // v2.1.6 FIX (H7): idempotent — unsubscribe previous listeners first
+  if (_unsubscribeFs) { _unsubscribeFs(); _unsubscribeFs = null; }
+  if (_unsubscribeRtdb) { _unsubscribeRtdb(); _unsubscribeRtdb = null; }
+
   _unsubscribeFs = onSnapshot(
     doc(getDb(), FS_COLLECTIONS.configs, deviceId),
     (snap) => {
@@ -83,10 +87,22 @@ export function startConfigListener(): void {
           groups: { ...DEFAULT_CONFIG.groups, ...(data.groups || {}) },
         } as BotConfig;
       } else {
-        setDoc(doc(getDb(), FS_COLLECTIONS.configs, deviceId), DEFAULT_CONFIG).catch(() => {});
+        // v2.1.6 FIX: rule now allows bot to write its own config — create with default
+        setDoc(doc(getDb(), FS_COLLECTIONS.configs, deviceId), DEFAULT_CONFIG).catch(err => {
+          console.warn('[CONFIG] failed to create default config:', (err as Error).message);
+        });
       }
     },
-    (err) => console.warn('[CONFIG] FS listener error:', err.message),
+    (err) => {
+      console.warn('[CONFIG] FS listener error:', err.message);
+      // v2.1.6 FIX: only retry if still active
+      if (_unsubscribeFs) {
+        setTimeout(() => {
+          if (_unsubscribeFs) _unsubscribeFs();
+          startConfigListener();
+        }, 5_000);
+      }
+    },
   );
   _unsubscribeRtdb = onValue(
     ref(getRtdb(), RTDB_PATHS.configOverrides(deviceId)),
@@ -94,8 +110,21 @@ export function startConfigListener(): void {
       const overrides = snap.val();
       if (overrides && typeof overrides === 'object') {
         const { updatedAt, ...cfg } = overrides;
-        _config = { ..._config, ...cfg };
+        // v2.1.6 FIX (M4): deep-merge groups instead of shallow replace
+        if (cfg.groups && typeof cfg.groups === 'object') {
+          _config = {
+            ..._config,
+            ...cfg,
+            groups: { ..._config.groups, ...cfg.groups },
+          };
+        } else {
+          _config = { ..._config, ...cfg };
+        }
       }
+    },
+    // v2.1.6 FIX (H8): add error callback (was missing — silent permission failures)
+    (err: Error) => {
+      console.warn('[CONFIG] RTDB listener error:', err.message);
     },
   );
 }

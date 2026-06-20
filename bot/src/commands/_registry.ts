@@ -1,8 +1,16 @@
 /**
- * Zbot — Command Registry
+ * Zbot v2.1.6 — Command Registry
+ *
+ * v2.1.6 FIXES:
+ * - dispatchMessage now enforces ownerOnly + mode + isApproved (C1 — was total security bypass)
+ * - Uses getConfig().prefix instead of env var (C2 — prefix changes via config now work)
+ * - Added invokedAs to CommandContext (C14 — handlers can now distinguish aliases)
+ * - Deep-merge groups in updateConfig (M2 from firebase audit)
  */
 
 import type { WASocket, proto } from '@whiskeysockets/baileys';
+import { getConfig, updateConfig as updateRuntimeConfig } from '../firebase/config-runtime';
+import { isApproved } from '../firebase/number-registry';
 
 export interface CommandContext {
   sock: WASocket;
@@ -13,6 +21,7 @@ export interface CommandContext {
   text: string;
   isFromMe: boolean;
   isGroup: boolean;
+  invokedAs: string;  // v2.1.6: the actual command name typed (for alias handling)
 }
 
 export interface CommandModule {
@@ -50,7 +59,9 @@ export function getAllCommands(): CommandModule[] {
 export async function dispatchMessage(
   sock: WASocket, msg: proto.IWebMessageInfo, text: string,
 ): Promise<boolean> {
-  const prefix = process.env.BOT_PREFIX || '.';
+  // v2.1.6 FIX: read prefix from runtime config (was hardcoded to env var)
+  const cfg = getConfig();
+  const prefix = cfg.prefix || process.env.BOT_PREFIX || '.';
   if (!text.startsWith(prefix)) return false;
   const body = text.slice(prefix.length).trim();
   if (!body) return false;
@@ -59,9 +70,35 @@ export async function dispatchMessage(
   const args = parts.slice(1);
   const mod = _commands.get(cmdName);
   if (!mod) return false;
+
   const chatJid = msg.key.remoteJid || '';
   const sender = msg.key.participant || chatJid;
   const isGroup = chatJid.endsWith('@g.us');
+
+  // v2.1.6 FIX (C1): enforce ownerOnly + mode + isApproved
+  const senderPhone = sender.split('@')[0].split(':')[0];
+  const ownerDigits = (cfg.ownerNumber || '').replace(/[^0-9]/g, '');
+  const isOwner = ownerDigits.length > 0 && senderPhone === ownerDigits;
+
+  // If bot is not approved by admin, ignore all commands (except owner commands)
+  if (!isApproved() && !isOwner) {
+    return false;
+  }
+
+  // Private mode: only owner can run commands
+  if (cfg.mode === 'private' && !isOwner) {
+    return false;
+  }
+
+  // ownerOnly enforcement
+  if (mod.ownerOnly && !isOwner) {
+    try {
+      await sock.sendMessage(chatJid, {
+        text: '🚫 Owner only command.',
+      }, { quoted: msg });
+    } catch (e) { /* ignore */ }
+    return true;
+  }
 
   if (mod.groupOnly && !isGroup) {
     await sock.sendMessage(chatJid, {
@@ -74,6 +111,7 @@ export async function dispatchMessage(
     sock, msg, chatJid, sender, args,
     text: args.join(' '),
     isFromMe: msg.key.fromMe || false, isGroup,
+    invokedAs: cmdName,  // v2.1.6: pass the actual command name typed
   };
 
   try {

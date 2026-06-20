@@ -40,6 +40,11 @@ class BotService : Service() {
         var lastError: String? = null
             private set
 
+        // v2.1.6 FIX (C4): flag to prevent auto-restart after user-initiated stop
+        @Volatile
+        var userStopped: Boolean = false
+            private set
+
         /** Recent log lines for in-app debugging (max 1000 lines, ring buffer). */
         private val logBuffer = java.util.concurrent.ConcurrentLinkedDeque<String>()
 
@@ -77,6 +82,13 @@ class BotService : Service() {
                 return START_NOT_STICKY
             }
             else -> {
+                // v2.1.6 FIX (C4): clear userStopped on explicit start
+                userStopped = false
+                // v2.1.6 FIX (C6): clear user_stopped pref so KeepAliveWorker can restart
+                try {
+                    val prefs = getSharedPreferences("zbot_prefs", Context.MODE_PRIVATE)
+                    prefs.edit().putBoolean("user_stopped", false).apply()
+                } catch (e: Exception) { /* ignore */ }
                 startForeground(NOTIF_ID, buildNotification("Starting..."))
                 startBot()
             }
@@ -282,7 +294,15 @@ class BotService : Service() {
 
                 isRunning = false
 
+                // v2.1.6 FIX (C4/C9): if user explicitly stopped, don't auto-restart
+                if (userStopped) {
+                    addLog("[${System.currentTimeMillis()}] User stopped — not restarting")
+                    return@Thread
+                }
+
                 if (exitCode == 0) {
+                    // v2.1.6 FIX (C9): reset restartCount on clean exit
+                    restartCount = 0
                     updateNotification("Bot stopped")
                 } else {
                     // Restart with exponential backoff
@@ -291,9 +311,12 @@ class BotService : Service() {
                         val delayMs = (3_000L * (1L shl restartCount)).coerceAtMost(60_000L)
                         addLog("[${System.currentTimeMillis()}] Restarting in ${delayMs}ms (attempt $restartCount)")
                         Thread.sleep(delayMs)
-                        startBot()
+                        // Re-check userStopped after sleep
+                        if (!userStopped) startBot()
                     } else {
                         lastError = "Max restart attempts reached (exit code $exitCode)"
+                        // v2.1.6 FIX (C9): release wake locks when permanently dead
+                        releaseWakeLocks()
                         updateNotification("Bot failed — tap to restart")
                     }
                 }
@@ -313,6 +336,13 @@ class BotService : Service() {
      */
     private fun stopBot() {
         addLog("[${System.currentTimeMillis()}] Stopping bot...")
+        // v2.1.6 FIX (C4): set userStopped so BotRunner thread doesn't auto-restart
+        userStopped = true
+        // v2.1.6 FIX (C6): persist user_stopped flag so KeepAliveWorker respects it
+        try {
+            val prefs = getSharedPreferences("zbot_prefs", Context.MODE_PRIVATE)
+            prefs.edit().putBoolean("user_stopped", true).apply()
+        } catch (e: Exception) { /* ignore */ }
         try { nodeProcess?.destroy() } catch (e: Exception) {}
         nodeProcess = null
         isRunning = false
@@ -412,20 +442,39 @@ class BotService : Service() {
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         // Restart if user swipes the app away
-        val restartIntent = Intent(this, BotService::class.java).apply {
-            action = ACTION_START
-            setPackage(packageName)
+        // v2.1.6 FIX (C5): wrap in try-catch — setExactAndAllowWhileIdle throws SecurityException
+        // on Android 13+ if SCHEDULE_EXACT_ALARM not granted. Fall back to setAndAllowWhileIdle.
+        try {
+            val restartIntent = Intent(this, BotService::class.java).apply {
+                action = ACTION_START
+                setPackage(packageName)
+            }
+            val pi = PendingIntent.getService(
+                this, 1, restartIntent,
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            )
+            val alarm = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+            // Check capability before calling exact alarm
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S
+                && alarm.canScheduleExactAlarms()) {
+                alarm.setExactAndAllowWhileIdle(
+                    AlarmManager.ELAPSED_REALTIME,
+                    android.os.SystemClock.elapsedRealtime() + 1000,
+                    pi,
+                )
+            } else {
+                // Fallback: inexact alarm (doesn't need SCHEDULE_EXACT_ALARM)
+                alarm.setAndAllowWhileIdle(
+                    AlarmManager.ELAPSED_REALTIME,
+                    android.os.SystemClock.elapsedRealtime() + 1000,
+                    pi,
+                )
+            }
+        } catch (e: SecurityException) {
+            addLog("[${System.currentTimeMillis()}] Cannot schedule exact alarm: ${e.message}")
+        } catch (e: Exception) {
+            addLog("[${System.currentTimeMillis()}] onTaskRemoved alarm failed: ${e.message}")
         }
-        val pi = PendingIntent.getService(
-            this, 1, restartIntent,
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
-        val alarm = getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        alarm.setExactAndAllowWhileIdle(
-            AlarmManager.ELAPSED_REALTIME,
-            android.os.SystemClock.elapsedRealtime() + 1000,
-            pi
-        )
         super.onTaskRemoved(rootIntent)
     }
 

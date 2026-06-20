@@ -7,6 +7,7 @@ export const autoreact: CommandModule = {
   aliases: ['autoreacts'],
   description: 'Toggle auto-react to all messages',
   category: 'privacy',
+  ownerOnly: true,
   handler: async (ctx: CommandContext) => {
     const { sock, msg, chatJid, args } = ctx;
     const cfg = getConfig();
@@ -36,6 +37,7 @@ export const autoreply: CommandModule = {
   aliases: ['ar'],
   description: 'Keyword-based auto-reply (add/list/del)',
   category: 'privacy',
+  ownerOnly: true,
   handler: async (ctx: CommandContext) => {
     const { sock, msg, chatJid, args } = ctx;
     const cfg = getConfig();

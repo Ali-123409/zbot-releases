@@ -2,18 +2,23 @@ package com.zbot.wa
 
 import android.content.Context
 import android.content.Intent
+import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import dagger.assisted.Assisted
+import dagger.assisted.AssistedInject
 
 /**
  * Periodic worker that ensures BotService is alive.
  * Runs every 15 minutes (WorkManager minimum interval).
  *
- * If bot was user-stopped, doesn't restart (checks shared pref).
+ * v2.1.6 FIX (C6): now annotated as @HiltWorker so HiltWorkerFactory can construct it.
+ * Reads user_stopped flag — set by BotService.stopBot() so the worker respects user intent.
  */
-class KeepAliveWorker(
-    context: Context,
-    workerParams: WorkerParameters
+@HiltWorker
+class KeepAliveWorker @AssistedInject constructor(
+    @Assisted context: Context,
+    @Assisted workerParams: WorkerParameters
 ) : CoroutineWorker(context, workerParams) {
 
     override suspend fun doWork(): Result {
@@ -29,10 +34,15 @@ class KeepAliveWorker(
         }
 
         // Otherwise restart
-        val intent = Intent(applicationContext, BotService::class.java).apply {
-            action = BotService.ACTION_START
+        try {
+            val intent = Intent(applicationContext, BotService::class.java).apply {
+                action = BotService.ACTION_START
+            }
+            androidx.core.content.ContextCompat.startForegroundService(applicationContext, intent)
+        } catch (e: Exception) {
+            // SecurityException on Android 12+ if app is in background — ignore
+            return Result.retry()
         }
-        androidx.core.content.ContextCompat.startForegroundService(applicationContext, intent)
 
         return Result.success()
     }

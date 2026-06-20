@@ -40,7 +40,14 @@ object Routes {
 fun AppNav() {
     val nav = rememberNavController()
     NavHost(navController = nav, startDestination = Routes.SPLASH) {
-        composable(Routes.SPLASH) { SplashScreen(onContinue = { nav.navigate(Routes.STATUS) }) }
+        // v2.1.6 FIX (C8): pop Splash from back stack so Back from Status exits the app
+        composable(Routes.SPLASH) {
+            SplashScreen(onContinue = {
+                nav.navigate(Routes.STATUS) {
+                    popUpTo(Routes.SPLASH) { inclusive = true }
+                }
+            })
+        }
         composable(Routes.STATUS) {
             StatusScreen(
                 onPairClick = { nav.navigate(Routes.PAIR) },

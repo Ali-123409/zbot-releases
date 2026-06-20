@@ -90,26 +90,27 @@ fun PairScreen(onBack: () -> Unit) {
                         try {
                             val cleaned = phone.replace(Regex("[^0-9]"), "")
                             val client = OkHttpClient()
+                            // v2.1.6 FIX (L20): use 127.0.0.1 explicitly (was localhost — IPv6 risk)
                             val req = Request.Builder()
-                                .url("http://localhost:3001/pair?phone=$cleaned")
+                                .url("http://127.0.0.1:3001/pair?phone=$cleaned")
                                 .build()
                             val resp = withContext(Dispatchers.IO) { client.newCall(req).execute() }
                             val body = resp.body!!.string()
                             val json = org.json.JSONObject(body)
                             if (resp.isSuccessful) {
                                 val code = json.optString("code")
-                                // v2.1.4: handle "Already connected" gracefully
+                                // v2.1.6 FIX (C7): parenthesize if-expr to fix string concat precedence
                                 if (code == "Already connected") {
                                     val connPhone = json.optString("phone", "")
                                     error = "Bot is already connected" +
-                                        if (connPhone.isNotEmpty()) " as +$connPhone" else "" +
+                                        (if (connPhone.isNotEmpty()) " as +$connPhone" else "") +
                                         ". Use Disconnect first to pair a different number."
                                 } else {
                                     pairCode = code
                                 }
                             } else {
                                 val err = json.optString("error", "Failed to get pairing code")
-                                // v2.1.4: friendlier message for "pairing in progress"
+                                // v2.1.6: friendlier message for "pairing in progress"
                                 error = if (err.contains("already in progress", ignoreCase = true)) {
                                     "A pairing attempt is already in progress. Please wait 30 seconds for it to expire, or enter the previous code in WhatsApp."
                                 } else {

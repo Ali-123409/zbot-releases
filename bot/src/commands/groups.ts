@@ -6,6 +6,7 @@ export const welcome: CommandModule = {
   aliases: ['setwelcome'],
   description: 'Set or view welcome message (placeholders: @user @group @date)',
   category: 'admin',
+  ownerOnly: true,
   groupOnly: true,
   handler: async (ctx: CommandContext) => {
     const { sock, msg, chatJid, text } = ctx;
@@ -32,6 +33,7 @@ export const goodbye: CommandModule = {
   aliases: ['setgoodbye', 'bye'],
   description: 'Set or view goodbye message (placeholders: @user @group @date)',
   category: 'admin',
+  ownerOnly: true,
   groupOnly: true,
   handler: async (ctx: CommandContext) => {
     const { sock, msg, chatJid, text } = ctx;

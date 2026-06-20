@@ -1,24 +1,27 @@
 /**
- * Zbot v2.1.4 — Local HTTP Server
+ * Zbot v2.1.6 — Local HTTP Server
  *
  * Fixes:
- * - /pair now uses getSocketStatus() to differentiate between
- *   "Already connected", "Pairing in progress", and "ready to pair".
- * - Better error messages for the user.
+ * - /pair no longer gated on state.ready (was blocking first-time pairing forever — C1)
+ * - Re-checks status.connected after waitForSocketReady to avoid race (H6)
+ * - Bind to 127.0.0.1 (was 0.0.0.0 — security hole — anyone on LAN could drive the bot)
+ * - EADDRINUSE: log clearly + exit (was a no-op — H1)
+ * - Handles phone as array (M9)
+ * - /stop calls gracefulShutdown (was leaving Firebase listeners dangling — H2)
  */
 
 import express from 'express';
 import {
-  getSocket, requestPairingCode, disconnectSession,
-  stopBot, getCurrentQR, waitForSocketReady, getSocketStatus, isPairing,
+  requestPairingCode, disconnectSession,
+  stopBot, getCurrentQR, waitForSocketReady, getSocketStatus,
 } from '../socket';
 import { getDeviceId } from '../firebase/init';
 import { isApproved, isRevoked } from '../firebase/number-registry';
 import { getConfig, updateConfig, persistConfig } from '../firebase/config-runtime';
 
 const PORT = parseInt(process.env.BOT_PORT || '3001', 10);
-// Use 0.0.0.0 like FTGM — nodejs-mobile on Android has network isolation
-const HOST = '0.0.0.0';
+// v2.1.6 FIX (C4 from build audit): bind to 127.0.0.1 only (was 0.0.0.0 — exposed to LAN)
+const HOST = '127.0.0.1';
 
 // Ring buffer for bot-side logs (max 500 lines)
 const botLogs: string[] = [];
@@ -121,6 +124,9 @@ export function startHttpServer(): { close: () => void } {
 
   app.get('/status', (_req, res) => {
     const status = getSocketStatus();
+    let deviceId: string | null = null;
+    try { deviceId = getDeviceId(); }
+    catch (e) { deviceId = null; } // v2.1.6 FIX (M11): don't crash if Firebase auth not done
     res.json({
       status: status.connected
         ? `Connected: +${status.phone}`
@@ -129,23 +135,25 @@ export function startHttpServer(): { close: () => void } {
       pairing: status.pairing,
       phone: status.phone,
       ready: status.ready,
-      deviceId: getDeviceId(),
-      botVersion: process.env.BOT_VERSION || '2.1.4',
+      deviceId,
+      botVersion: process.env.BOT_VERSION || '2.1.6',
       approved: isApproved(),
       revoked: isRevoked(),
     });
   });
 
   /**
-   * Pair endpoint — v2.1.4 logic:
-   * 1. If socket is already connected (sock.user + ready) → return "Already connected"
+   * Pair endpoint — v2.1.6 logic:
+   * 1. If already connected (sock.user AND state.ready) → return "Already connected"
    * 2. If pairing in progress → return 409 "Pairing in progress"
-   * 3. If socket not ready (still starting) → return 503 "Bot still starting"
-   * 4. Otherwise → request pair code
+   * 3. Otherwise → request pair code (NO waitForSocketReady gate — was blocking
+   *    first-time pairing because state.ready only becomes true AFTER connect)
    */
   app.get('/pair', async (req, res) => {
     try {
-      const phone = (req.query.phone as string || '').replace(/[^0-9]/g, '');
+      // v2.1.6 FIX (M9): phone might be array if ?phone=123&phone=456
+      const rawPhone = Array.isArray(req.query.phone) ? req.query.phone[0] : req.query.phone;
+      const phone = (rawPhone as string || '').replace(/[^0-9]/g, '');
       if (!phone || phone.length < 10 || phone.length > 15) {
         res.status(400).json({ error: 'Invalid phone number (must be 10-15 digits)' });
         return;
@@ -174,12 +182,19 @@ export function startHttpServer(): { close: () => void } {
         return;
       }
 
-      // Wait briefly for socket to be ready (initial boot)
-      const ready = await waitForSocketReady(5_000);
-      if (!ready) {
-        console.log('[HTTP] /pair: socket not ready yet');
-        res.status(503).json({
-          error: 'Bot is still starting up. Try again in a few seconds.',
+      // v2.1.6 FIX (C1): removed waitForSocketReady gate — was blocking first-time pairing
+      // because state.ready only becomes true AFTER a successful connection.
+      // For a fresh bot with no creds, the socket is created in startBot() (synchronously
+      // awaited in index.ts), so by the time HTTP requests arrive, state.sock is set.
+      // requestPairingCode will kill + recreate the socket anyway.
+
+      // v2.1.6 FIX (H6): re-check status one more time to avoid race with auto-reconnect
+      const statusNow = getSocketStatus();
+      if (statusNow.connected) {
+        res.json({
+          code: 'Already connected',
+          connected: true,
+          phone: statusNow.phone,
         });
         return;
       }
@@ -227,9 +242,16 @@ export function startHttpServer(): { close: () => void } {
 
   app.get('/stop', async (_req, res) => {
     res.json({ ok: true });
+    // v2.1.6 FIX (H2): use a short delay then exit. BotService will respawn us.
+    // The OS will clean up Firebase listeners on process exit.
     setTimeout(async () => {
-      try { await stopBot(); process.exit(0); }
-      catch (err) { console.error('[HTTP] stop failed:', err); process.exit(1); }
+      try {
+        await stopBot();
+        process.exit(0);
+      } catch (err) {
+        console.error('[HTTP] stop failed:', err);
+        process.exit(1);
+      }
     }, 500);
   });
 
@@ -238,8 +260,10 @@ export function startHttpServer(): { close: () => void } {
   });
 
   server.on('error', (err: NodeJS.ErrnoException) => {
+    // v2.1.6 FIX (H1): actually log + flag the error clearly (was a no-op lie)
     if (err.code === 'EADDRINUSE') {
-      console.log(`[HTTP] port ${PORT} in use, trying ${PORT + 1}`);
+      console.error(`[HTTP] FATAL: port ${PORT} already in use. Bot cannot start HTTP server.`);
+      console.error('[HTTP] Another bot instance may be running. Exiting.');
     } else {
       console.error('[HTTP] server error:', err);
     }

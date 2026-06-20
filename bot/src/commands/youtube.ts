@@ -82,8 +82,10 @@ export const youtube: CommandModule = {
   description: 'Download YouTube video/audio or search',
   category: 'downloader',
   handler: async (ctx) => {
-    const { sock, msg, chatJid, args } = ctx;
-    const cmd = (msg.message?.extendedTextMessage?.text || '').split(/\s+/)[0]?.toLowerCase().slice(1);
+    const { sock, msg, chatJid, args, invokedAs } = ctx;
+    // v2.1.6 FIX (C4): use invokedAs from context (was parsing raw text with .slice(1)
+    // which broke for non-'.' prefixes and for plain-text messages)
+    const cmd = invokedAs;
     if (!args[0]) {
       await sock.sendMessage(chatJid, {
         text: '⚠️ Usage:\n• .yt <url> — download video\n• .ytmp3 <url> — download audio\n• .play <song name> — search and play audio\n• .yts <query> — search YouTube',

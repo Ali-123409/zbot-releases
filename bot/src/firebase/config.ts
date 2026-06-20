@@ -27,7 +27,8 @@ export const RTDB_PATHS = {
   commandProgressDevice: (cmdId: string, deviceId: string) =>
     `commandProgress/${cmdId}/devices/${deviceId}`,
   configOverrides: (deviceId: string) => `configOverrides/${deviceId}`,
-  scamperEvidence: (scammerPhone: string, evidenceId: string) =>
+  // v2.1.6 FIX (M8): renamed from scamperEvidence (typo)
+  scammerEvidence: (scammerPhone: string, evidenceId: string) =>
     `scammers/${scammerPhone}/evidence/${evidenceId}`,
 } as const;
 
