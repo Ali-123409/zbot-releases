@@ -1,11 +1,16 @@
 /**
- * Zbot — Local HTTP Server
+ * Zbot v2.1.4 — Local HTTP Server
+ *
+ * Fixes:
+ * - /pair now uses getSocketStatus() to differentiate between
+ *   "Already connected", "Pairing in progress", and "ready to pair".
+ * - Better error messages for the user.
  */
 
 import express from 'express';
 import {
   getSocket, requestPairingCode, disconnectSession,
-  stopBot, getCurrentQR, waitForSocketReady,
+  stopBot, getCurrentQR, waitForSocketReady, getSocketStatus, isPairing,
 } from '../socket';
 import { getDeviceId } from '../firebase/init';
 import { isApproved, isRevoked } from '../firebase/number-registry';
@@ -115,19 +120,29 @@ export function startHttpServer(): { close: () => void } {
   });
 
   app.get('/status', (_req, res) => {
-    const sock = getSocket();
-    const connected = !!sock?.user;
-    const phone = sock?.user?.id?.split(':')[0]?.split('@')[0] || '';
+    const status = getSocketStatus();
     res.json({
-      status: connected ? `Connected: +${phone}` : 'Waiting for pairing...',
-      connected, phone,
+      status: status.connected
+        ? `Connected: +${status.phone}`
+        : (status.pairing ? 'Pairing in progress...' : 'Waiting for pairing...'),
+      connected: status.connected,
+      pairing: status.pairing,
+      phone: status.phone,
+      ready: status.ready,
       deviceId: getDeviceId(),
-      botVersion: process.env.BOT_VERSION || '1.0.0',
+      botVersion: process.env.BOT_VERSION || '2.1.4',
       approved: isApproved(),
       revoked: isRevoked(),
     });
   });
 
+  /**
+   * Pair endpoint — v2.1.4 logic:
+   * 1. If socket is already connected (sock.user + ready) → return "Already connected"
+   * 2. If pairing in progress → return 409 "Pairing in progress"
+   * 3. If socket not ready (still starting) → return 503 "Bot still starting"
+   * 4. Otherwise → request pair code
+   */
   app.get('/pair', async (req, res) => {
     try {
       const phone = (req.query.phone as string || '').replace(/[^0-9]/g, '');
@@ -135,21 +150,41 @@ export function startHttpServer(): { close: () => void } {
         res.status(400).json({ error: 'Invalid phone number (must be 10-15 digits)' });
         return;
       }
-      const sock = getSocket();
-      if (sock?.user) {
+
+      const status = getSocketStatus();
+
+      // Already connected (sock.user is set AND state.ready is true)
+      if (status.connected) {
+        console.log('[HTTP] /pair: already connected as', status.phone);
         res.json({
-          code: 'Already connected', connected: true,
-          phone: sock.user.id.split(':')[0],
+          code: 'Already connected',
+          connected: true,
+          phone: status.phone,
         });
         return;
       }
-      const ready = await waitForSocketReady(10_000);
+
+      // Pairing in progress — DON'T start a new pair, let the existing one finish
+      if (status.pairing) {
+        console.log('[HTTP] /pair: pairing already in progress');
+        res.status(409).json({
+          error: 'Pairing already in progress. Wait for the current code to expire (30s) or enter it in WhatsApp.',
+          pairing: true,
+        });
+        return;
+      }
+
+      // Wait briefly for socket to be ready (initial boot)
+      const ready = await waitForSocketReady(5_000);
       if (!ready) {
+        console.log('[HTTP] /pair: socket not ready yet');
         res.status(503).json({
-          error: 'Socket not ready — bot is still starting up. Try again in a few seconds.',
+          error: 'Bot is still starting up. Try again in a few seconds.',
         });
         return;
       }
+
+      console.log('[HTTP] /pair: requesting pair code for', phone);
       const code = await requestPairingCode(phone);
       res.json({ code, connected: false, phone });
     } catch (err) {
@@ -182,8 +217,12 @@ export function startHttpServer(): { close: () => void } {
   });
 
   app.get('/disconnect', async (_req, res) => {
-    try { await disconnectSession(); res.json({ ok: true }); }
-    catch (err) { res.status(500).json({ error: (err as Error).message }); }
+    try {
+      await disconnectSession();
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
   });
 
   app.get('/stop', async (_req, res) => {

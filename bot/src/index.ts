@@ -70,12 +70,13 @@ registerCommands([
 ]);
 
 async function bootstrap(): Promise<void> {
+  const ver = process.env.BOT_VERSION || '2.1.4';
   console.log('========================================');
-  console.log('  Zbot v1.0.0 — starting up');
+  console.log('  Zbot v' + ver + ' — starting up');
   console.log('========================================');
   console.log('  Node version:', process.version);
   console.log('  BOT_DATA_DIR:', process.env.BOT_DATA_DIR || '(not set)');
-  console.log('  BOT_VERSION:', process.env.BOT_VERSION || '1.0.0');
+  console.log('  BOT_VERSION:', process.env.BOT_VERSION || '2.1.4');
   console.log('  Has globalThis.crypto:', typeof globalThis.crypto);
   console.log('  Has crypto.subtle:', typeof (globalThis.crypto as any)?.subtle);
   console.log('');

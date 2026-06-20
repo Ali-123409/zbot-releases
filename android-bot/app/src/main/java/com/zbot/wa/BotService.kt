@@ -230,9 +230,10 @@ class BotService : Service() {
                 env.forEach { (k, v) -> addLog("  $k=$v") }
 
                 // 6. Launch Node.js
+                // v2.1.4: bumped from 128MB to 256MB — Baileys + Firebase SDK needs more headroom
                 val cmd = listOf(
                     nodeBinary.absolutePath,
-                    "--max-old-space-size=128",
+                    "--max-old-space-size=256",
                     bundleJs.absolutePath
                 )
                 addLog("[${System.currentTimeMillis()}] Launching: ${cmd.joinToString(" ")}")

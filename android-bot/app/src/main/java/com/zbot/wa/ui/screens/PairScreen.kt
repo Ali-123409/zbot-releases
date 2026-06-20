@@ -97,9 +97,24 @@ fun PairScreen(onBack: () -> Unit) {
                             val body = resp.body!!.string()
                             val json = org.json.JSONObject(body)
                             if (resp.isSuccessful) {
-                                pairCode = json.optString("code")
+                                val code = json.optString("code")
+                                // v2.1.4: handle "Already connected" gracefully
+                                if (code == "Already connected") {
+                                    val connPhone = json.optString("phone", "")
+                                    error = "Bot is already connected" +
+                                        if (connPhone.isNotEmpty()) " as +$connPhone" else "" +
+                                        ". Use Disconnect first to pair a different number."
+                                } else {
+                                    pairCode = code
+                                }
                             } else {
-                                error = json.optString("error", "Failed to get pairing code")
+                                val err = json.optString("error", "Failed to get pairing code")
+                                // v2.1.4: friendlier message for "pairing in progress"
+                                error = if (err.contains("already in progress", ignoreCase = true)) {
+                                    "A pairing attempt is already in progress. Please wait 30 seconds for it to expire, or enter the previous code in WhatsApp."
+                                } else {
+                                    err
+                                }
                             }
                         } catch (e: Exception) {
                             error = e.message ?: "Network error"
