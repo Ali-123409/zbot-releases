@@ -355,36 +355,15 @@ class BotService : Service() {
      * Copy versioned native libs (libssl.so.3, libcrypto.so.3, etc.)
      * from APK's lib dir to filesDir/node-libs/.
      *
-     * v2.1.5: Removed duplicate unversioned ICU/z/ssl/crypto libs — libnode.so
-     * only loads the versioned names (libicudata.so.78, libssl.so.3, etc.).
-     * Shipping both versions was wasting ~70MB. Also removed libc++_shared.so
-     * (already provided by Android system for arm64-v8a).
+     * v2.1.7: nodejs-mobile v18.20.4's libnode.so statically links ICU/SSL/crypto/zlib,
+     * so we no longer ship those .so files. This function is now a no-op but kept for
+     * backward compatibility (and in case future libnode.so builds need external libs).
      */
     private fun copyVersionedLibs(nativeLibDir: String, targetDir: File) {
-        val mappings = listOf(
-            "libz_v1.so" to "libz.so.1",
-            "libcrypto_v3.so" to "libcrypto.so.3",
-            "libssl_v3.so" to "libssl.so.3",
-            "libicui18n_v78.so" to "libicui18n.so.78",
-            "libicuuc_v78.so" to "libicuuc.so.78",
-            "libicudata_v78.so" to "libicudata.so.78",
-            "libffi.so" to "libffi.so",
-            "libcares.so" to "libcares.so",
-            "libsqlite3.so" to "libsqlite3.so"
-        )
-        for ((source, target) in mappings) {
-            val srcFile = File(nativeLibDir, source)
-            val targetFile = File(targetDir, target)
-            if (targetFile.exists() && targetFile.length() > 0) continue
-            if (!srcFile.exists()) continue
-            try {
-                srcFile.copyTo(targetFile, overwrite = true)
-                targetFile.setReadable(true, false)
-                targetFile.setExecutable(true, false)
-            } catch (e: Exception) {
-                addLog("[${System.currentTimeMillis()}] Failed to copy $source → $target: ${e.message}")
-            }
-        }
+        // v2.1.7: All deps are statically linked in nodejs-mobile v18.20.4 libnode.so.
+        // Only libc++_shared.so is needed (provided by Android system on arm64-v8a).
+        // No-op — kept for future expansion if we ever need external .so files.
+        addLog("[${System.currentTimeMillis()}] copyVersionedLibs: no-op (libnode.so v18.20.4 is self-contained)")
     }
 
     private fun updateNotification(text: String) {
